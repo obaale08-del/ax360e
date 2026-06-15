@@ -95,42 +95,33 @@ namespace ae{
     extern std::unique_ptr<xe::ui::WindowedApp> g_windowed_app;
 }
 void AndroidWindowedAppContext::NotifyUILoopOfPendingFunctions() {
-    assert(WindowedAppContext::ui_thread_id_!=std::this_thread::get_id());
-    pthread_mutex_lock(&mutex);
-    event=EVENT_EXECUTE_PENDING_FUNCTIONS;
-    while(event){
-        pthread_cond_wait(&cond, &mutex);
-    }
-    pthread_mutex_unlock(&mutex);
+    std::unique_lock<std::mutex> lock(mutex);
+    bool completed = false;
+    events.push({EVENT_EXECUTE_PENDING_FUNCTIONS, &completed});
+    cv.notify_one();
+    cv.wait(lock, [&completed] { return completed; });
 }
 
 void AndroidWindowedAppContext::PlatformQuitFromUIThread() {
-    if(WindowedAppContext::ui_thread_id_==std::this_thread::get_id()){
-        event=EVENT_QUIT;
-        return;
-    }
-
-    pthread_mutex_lock(&mutex);
-    event=EVENT_QUIT;
-    while ( event){
-        pthread_cond_wait(&cond, &mutex);
-    }
-    pthread_mutex_unlock(&mutex);
+    std::lock_guard<std::mutex> lock(mutex);
+    events.push({EVENT_QUIT, nullptr});
+    cv.notify_one();
 }
 
 void AndroidWindowedAppContext::request_paint() {
-
-    if(WindowedAppContext::ui_thread_id_==std::this_thread::get_id()){
-        event=EVENT_PAINT;
+    bool expected = false;
+    if (!paint_pending_.compare_exchange_strong(expected, true)) {
         return;
     }
+    std::lock_guard<std::mutex> lock(mutex);
+    events.push({EVENT_PAINT, nullptr});
+    cv.notify_one();
+}
 
-    pthread_mutex_lock(&mutex);
-    event=EVENT_PAINT;
-    while(event){
-        pthread_cond_wait(&cond, &mutex);
-    }
-    pthread_mutex_unlock(&mutex);
+void AndroidWindowedAppContext::request_surface_changed() {
+    std::lock_guard<std::mutex> lock(mutex);
+    events.push({EVENT_SURFACE_CHANGED, nullptr});
+    cv.notify_one();
 }
 
 void AndroidWindowedAppContext::setup_ui_thr_id(std::thread::id id){
@@ -140,48 +131,48 @@ void AndroidWindowedAppContext::setup_ui_thr_id(std::thread::id id){
 void AndroidWindowedAppContext::main_loop(){
     assert(WindowedAppContext::ui_thread_id_==std::this_thread::get_id());
     while(!WindowedAppContext::HasQuitFromUIThread()){
-        if(event==0){
-            //std::this_thread::yield();
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        EventItem item;
+        {
+            std::unique_lock<std::mutex> lock(mutex);
+            cv.wait(lock, [this] { return !events.empty() || WindowedAppContext::HasQuitFromUIThread(); });
+            if(events.empty()) {
+                continue;
+            }
+            item = events.front();
+            events.pop();
         }
-        else if(event==EVENT_EXECUTE_PENDING_FUNCTIONS){
-            pthread_mutex_lock(&mutex);
 
+        if(item.type==EVENT_EXECUTE_PENDING_FUNCTIONS){
             WindowedAppContext::ExecutePendingFunctionsFromUIThread();
-            if(event==EVENT_EXECUTE_PENDING_FUNCTIONS)
-                event=0;
-
-            pthread_cond_signal(&cond);
-            pthread_mutex_unlock(&mutex);
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                *item.completed = true;
+            }
+            cv.notify_one();
         }
-        else if(event==EVENT_PAINT){
-            pthread_mutex_lock(&mutex);
-            EmulatorApp* app=reinterpret_cast<EmulatorApp*>(ae::g_windowed_app.get());
-            AndroidWindow* win=reinterpret_cast<AndroidWindow*>(app->emu_window.get());
+        else if(item.type==EVENT_PAINT){
+            paint_pending_.store(false, std::memory_order_release);
+            EmulatorApp* app=static_cast<EmulatorApp*>(ae::g_windowed_app.get());
+            AndroidWindow* win=static_cast<AndroidWindow*>(app->emu_window->window());
             win->Paint();
-            event=0;
-            pthread_cond_signal(&cond);
-            pthread_mutex_unlock(&mutex);
         }
-        else if(event==EVENT_QUIT){
-            pthread_mutex_lock(&mutex);
+        else if(item.type==EVENT_SURFACE_CHANGED){
+            EmulatorApp* app=static_cast<EmulatorApp*>(ae::g_windowed_app.get());
+            AndroidWindow* win=static_cast<AndroidWindow*>(app->emu_window->window());
+            win->UpdateSurface();
+        }
+        else if(item.type==EVENT_QUIT){
             WindowedAppContext::QuitFromUIThread();
-            event=0;
-            pthread_cond_signal(&cond);
-            pthread_mutex_unlock(&mutex);
+            cv.notify_all();
             return;
         }
     }
 }
 
 AndroidWindowedAppContext::AndroidWindowedAppContext() {
-    pthread_mutex_init(&mutex, nullptr);
-    pthread_cond_init(&cond, nullptr);
 }
 
 AndroidWindowedAppContext::~AndroidWindowedAppContext(){
-    pthread_cond_destroy(&cond);
-    pthread_mutex_destroy(&mutex);
 }
 
 AndroidWindow::AndroidWindow(xe::ui::WindowedAppContext& app_context, const std::string_view title,
@@ -190,6 +181,19 @@ AndroidWindow::AndroidWindow(xe::ui::WindowedAppContext& app_context, const std:
 
 bool AndroidWindow::OpenImpl() {
     XELOGI("Opening Android window...");
+
+    if (ae::window) {
+        int w = ANativeWindow_getWidth(ae::window);
+        int h = ANativeWindow_getHeight(ae::window);
+        if (w > 0 && h > 0) {
+            OnDesiredLogicalSizeUpdate(SizeToLogical(w), SizeToLogical(h));
+            WindowDestructionReceiver destruction_receiver(this);
+            OnActualSizeUpdate(uint32_t(w), uint32_t(h), destruction_receiver);
+        } else {
+            XELOGW("Android window has invalid size: {}x{}", w, h);
+        }
+    }
+
     return true;
 }
 
@@ -208,11 +212,22 @@ std::unique_ptr<xe::ui::Surface> AndroidWindow::CreateSurfaceImpl(xe::ui::Surfac
 
 void AndroidWindow::RequestPaintImpl() {
     XELOGI("Requesting Android window paint...");
-    AndroidWindowedAppContext* context=static_cast<AndroidWindowedAppContext*>(&app_context());
-    context->request_paint();
+    static_cast<AndroidWindowedAppContext&>(app_context()).request_paint();
 }
 
 void AndroidWindow::UpdateSurface(){
+    if (ae::window) {
+        int w = ANativeWindow_getWidth(ae::window);
+        int h = ANativeWindow_getHeight(ae::window);
+        if (w > 0 && h > 0) {
+            OnDesiredLogicalSizeUpdate(SizeToLogical(w), SizeToLogical(h));
+            WindowDestructionReceiver destruction_receiver(this);
+            OnActualSizeUpdate(uint32_t(w), uint32_t(h), destruction_receiver);
+            if (destruction_receiver.IsWindowDestroyedOrClosed()) {
+                return;
+            }
+        }
+    }
     OnSurfaceChanged(true);
 }
 
@@ -710,6 +725,11 @@ namespace ae{
             xe::hid::android::AndroidInputDriver* driver=reinterpret_cast<xe::hid::android::AndroidInputDriver*>(g_windowed_app_ref->emu->input_system()->drivers_[0].get());
             driver->OnKey(key_code,pressed,value);
         }
+    }
+    void surface_changed(){
+        if(!g_windowed_app) return;
+        auto* ctx=static_cast<AndroidWindowedAppContext*>(&g_windowed_app->app_context());
+        ctx->request_surface_changed();
     }
     bool is_running(){
         return !g_windowed_app_ref->emu->is_paused();

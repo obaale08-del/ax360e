@@ -22,6 +22,7 @@ namespace ae{
 
     extern void main_thr();
     extern void key_event(int key_code,bool pressed,int value);
+    extern void surface_changed();
     extern bool is_running();
     extern bool is_paused();
     extern void pause();

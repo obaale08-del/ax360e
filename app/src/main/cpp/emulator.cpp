@@ -6,6 +6,12 @@
 #include <jni.h>
 #include <thread>
 
+#include "xenia/ui/windowed_app.h"
+
+namespace ae{
+    extern std::unique_ptr<xe::ui::WindowedApp> g_windowed_app;
+}
+
 #define LOG_TAG "Emulator_Config"
 #define LOGE(...) {      \
     __android_log_print(ANDROID_LOG_ERROR, LOG_TAG,"%s : %d",__FILE__,__LINE__);\
@@ -457,6 +463,11 @@ static void j_boot(JNIEnv* env,jobject self){
 static void j_change_surface(JNIEnv* env,jobject self,jint w,jint h){
     ae::window_width=w;
     ae::window_height=h;
+    ae::surface_changed();
+}
+
+static void j_surface_changed(JNIEnv* env,jobject self){
+    ae::surface_changed();
 }
 
 static void j_setup_surface(JNIEnv* env,jobject self,jobject surface){
@@ -508,6 +519,7 @@ int register_Emulator(JNIEnv* env){
             { "pause", "()V", (void *) j_pause },
             { "resume", "()V", (void *) j_resume },
             { "change_surface", "(II)V", (void *) j_change_surface },
+            { "surface_changed", "()V", (void *) j_surface_changed },
     };
     return env->RegisterNatives(env->FindClass("aenu/emulator/Emulator"),methods, sizeof(methods)/sizeof(methods[0]));
 }

@@ -739,11 +739,18 @@ dword_result_t XamShowMarketplaceUIEx_entry(dword_t user_index, dword_t ui_type,
       }
       break;
   }
-
+#if XE_PLATFORM_AX360E
+  if (ui_type == 1 && is_xbla_unlock_offer) {
+    cvars::license_mask = 1;
+  }
+  kernel_state()->BroadcastNotification(kXNotificationLiveContentInstalled, 0);
+  return X_ERROR_SUCCESS;
+#else
   const Emulator* emulator = kernel_state()->emulator();
   xe::ui::ImGuiDrawer* imgui_drawer = emulator->imgui_drawer();
   return xeXamDispatchDialogAsync<MessageBoxDialog>(
       new MessageBoxDialog(imgui_drawer, title, desc, buttons, 0), close);
+#endif
 }
 DECLARE_XAM_EXPORT1(XamShowMarketplaceUIEx, kUI, kSketchy);
 

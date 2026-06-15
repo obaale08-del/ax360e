@@ -225,10 +225,10 @@ public class EmulatorActivity extends Activity implements SurfaceHolder.Callback
         }
         else{
             Emulator.get.setup_surface(holder.getSurface());
+            Emulator.get.surface_changed();
             if(Emulator.get.is_paused())
                 Emulator.get.resume();
         }
-
 
     }
 

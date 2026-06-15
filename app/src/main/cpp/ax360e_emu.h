@@ -11,14 +11,21 @@
 
 class AndroidWindowedAppContext final : public xe::ui::WindowedAppContext {
 public:
+    struct EventItem {
+        int type;
+        bool* completed;
+    };
 
-    volatile int event=0;
+    std::queue<EventItem> events;
     static const int EVENT_EXECUTE_PENDING_FUNCTIONS = 1;
     static const int EVENT_QUIT = 2;
     static const int EVENT_PAINT = 3;
+    static const int EVENT_SURFACE_CHANGED = 4;
 
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
+    std::mutex mutex;
+    std::condition_variable cv;
+
+    std::atomic<bool> paint_pending_{false};
 
     void NotifyUILoopOfPendingFunctions() override;
 
@@ -27,6 +34,8 @@ public:
     void setup_ui_thr_id(std::thread::id id);
 
     void request_paint();
+
+    void request_surface_changed();
 
     void main_loop();
 
