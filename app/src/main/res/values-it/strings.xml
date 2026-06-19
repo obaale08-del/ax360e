@@ -1,5 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="es_apu_xma_decoder">Decoder Xma</string>
+    <string name="es_cpu_disable_context_promotion">Disabilita Promozione Contesto</string>
+    <string name="es_cpu_disable_instruction_infocache">Disabilita Cache Informazioni Istruzioni</string>
+    <string name="es_cpu_disable_prefetch_and_cachecontrol">Disabilita Prefetch e Controllo Cache</string>
+    <string name="es_cpu_dump_translated_hir_functions">Scarica Funzioni HIR Tradotte</string>
+    <string name="es_cpu_emit_inline_mmio_checks">Emetti Verifiche MMIO Inline</string>
+    <string name="es_cpu_emit_mmio_aware_stores_for_recorded_exception_addresses">Emetti Archiviazioni Consapevoli di MMIO per Indirizzi di Eccezione Registrati</string>
+    <string name="es_cpu_enable_early_precompilation">Abilita Precompilazione Anticipata</string>
+    <string name="es_cpu_full_optimization_even_with_debug">Ottimizzazione Completa Anche con Debug</string>
+    <string name="es_cpu_ignore_trap_instructions">Ignora Istruzioni Trap</string>
+    <string name="es_cpu_no_reserved_ops">Nessuna Operazione Riservata</string>
+    <string name="es_cpu_permit_float_constant_evaluation">Consenti Valutazione Costanti Float</string>
+    <string name="es_cpu_record_mmio_access_exceptions">Registra Eccezioni di Accesso MMIO</string>
+    <string name="es_cpu_writable_code_segments">Segmenti di Codice Scrivibili</string>
+    <string name="es_gpu_gpu_allow_invalid_upload_range">GPU Consenti Intervallo di Caricamento Non Valido</string>
+    <string name="es_gpu_target_trace_file">File di Traccia Obiettivo</string>
+    <string name="es_gpu_trace_dump_path">Percorso di Scarico Traccia</string>
+    <string name="es_general_allow_game_relative_writes">Consenti Scritture Relative al Gioco</string>
+    <string name="es_general_controller_hotkeys">Tasti di Scelta Rapida del Controller</string>
+    <string name="es_general_disable_doubleclick_fullscreen">Disabilita Schermo Intero con Doppio Clic</string>
+    <string name="es_hid_guide_button">Pulsante Guida</string>
+    <string name="es_kernel_allow_avatar_initialization">Consenti Inizializzazione Avatar</string>
+    <string name="es_storage_force_mount_devkit">Forza Montaggio Devkit</string>
+    <string name="es_storage_mount_memory_unit">Monta Unità di Memoria</string>
+    <string name="es_ui_custom_font_path">Percorso Carattere Personalizzato</string>
+
     <string name="_default">Predefinito</string>
     <string name="driver_library_path_dialog_add_hint">Aggiungi Driver Personalizzato (*.zip)</string>
     <string name="es_vulkan_vulkan_lib_path">Percorso Libreria Driver Personalizzato</string>

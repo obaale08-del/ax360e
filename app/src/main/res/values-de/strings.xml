@@ -1,5 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="es_apu_xma_decoder">Xma-Decoder</string>
+    <string name="es_cpu_disable_context_promotion">Kontext-Promotion deaktivieren</string>
+    <string name="es_cpu_disable_instruction_infocache">Anweisungs-Infocache deaktivieren</string>
+    <string name="es_cpu_disable_prefetch_and_cachecontrol">Prefetch und Cachecontrol deaktivieren</string>
+    <string name="es_cpu_dump_translated_hir_functions">Übersetzte HIR-Funktionen dumpen</string>
+    <string name="es_cpu_emit_inline_mmio_checks">Inline-MMIO-Prüfungen ausgeben</string>
+    <string name="es_cpu_emit_mmio_aware_stores_for_recorded_exception_addresses">MMIO-bewusste Speicherungen für aufgezeichnete Ausnahmeadressen ausgeben</string>
+    <string name="es_cpu_enable_early_precompilation">Frühe Vorkompilierung aktivieren</string>
+    <string name="es_cpu_full_optimization_even_with_debug">Volle Optimierung auch mit Debug</string>
+    <string name="es_cpu_ignore_trap_instructions">Trap-Anweisungen ignorieren</string>
+    <string name="es_cpu_no_reserved_ops">Keine reservierten Operationen</string>
+    <string name="es_cpu_permit_float_constant_evaluation">Fließkomma-Konstantenauswertung erlauben</string>
+    <string name="es_cpu_record_mmio_access_exceptions">MMIO-Zugriffsausnahmen aufzeichnen</string>
+    <string name="es_cpu_writable_code_segments">Beschreibbare Codesegmente</string>
+    <string name="es_gpu_gpu_allow_invalid_upload_range">GPU erlaubt ungültigen Upload-Bereich</string>
+    <string name="es_gpu_target_trace_file">Ziel-Trace-Datei</string>
+    <string name="es_gpu_trace_dump_path">Trace-Dump-Pfad</string>
+    <string name="es_general_allow_game_relative_writes">Spielrelative Schreibvorgänge erlauben</string>
+    <string name="es_general_controller_hotkeys">Controller-Tastenkombinationen</string>
+    <string name="es_general_disable_doubleclick_fullscreen">Doppelklick-Vollbild deaktivieren</string>
+    <string name="es_hid_guide_button">Guide-Taste</string>
+    <string name="es_kernel_allow_avatar_initialization">Avatar-Initialisierung erlauben</string>
+    <string name="es_storage_force_mount_devkit">Devkit-Einhängen erzwingen</string>
+    <string name="es_storage_mount_memory_unit">Speichereinheit einhängen</string>
+    <string name="es_ui_custom_font_path">Benutzerdefinierter Schriftpfad</string>
+
     <string name="_default">Standard</string>
     <string name="driver_library_path_dialog_add_hint">Benutzerdefinierten Treiber hinzufügen (*.zip)</string>
     <string name="es_vulkan_vulkan_lib_path">Pfad zur benutzerdefinierten Treiberbibliothek</string>

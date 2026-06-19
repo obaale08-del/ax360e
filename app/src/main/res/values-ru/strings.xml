@@ -1,5 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="es_apu_xma_decoder">Декодер Xma</string>
+    <string name="es_cpu_disable_context_promotion">Отключить продвижение контекста</string>
+    <string name="es_cpu_disable_instruction_infocache">Отключить инфокэш инструкций</string>
+    <string name="es_cpu_disable_prefetch_and_cachecontrol">Отключить предварительную выборку и управление кэшем</string>
+    <string name="es_cpu_dump_translated_hir_functions">Дамп переведённых функций HIR</string>
+    <string name="es_cpu_emit_inline_mmio_checks">Вывод встроенных проверок MMIO</string>
+    <string name="es_cpu_emit_mmio_aware_stores_for_recorded_exception_addresses">Вывод MMIO-ориентированных записей для зарегистрированных адресов исключений</string>
+    <string name="es_cpu_enable_early_precompilation">Включить раннюю предварительную компиляцию</string>
+    <string name="es_cpu_full_optimization_even_with_debug">Полная оптимизация даже при отладке</string>
+    <string name="es_cpu_ignore_trap_instructions">Игнорировать инструкции-ловушки</string>
+    <string name="es_cpu_no_reserved_ops">Нет зарезервированных операций</string>
+    <string name="es_cpu_permit_float_constant_evaluation">Разрешить вычисление констант с плавающей точкой</string>
+    <string name="es_cpu_record_mmio_access_exceptions">Записывать исключения доступа MMIO</string>
+    <string name="es_cpu_writable_code_segments">Записываемые сегменты кода</string>
+    <string name="es_gpu_gpu_allow_invalid_upload_range">GPU разрешить недопустимый диапазон загрузки</string>
+    <string name="es_gpu_target_trace_file">Файл трассировки цели</string>
+    <string name="es_gpu_trace_dump_path">Путь дампа трассировки</string>
+    <string name="es_general_allow_game_relative_writes">Разрешить относительные записи игры</string>
+    <string name="es_general_controller_hotkeys">Горячие клавиши контроллера</string>
+    <string name="es_general_disable_doubleclick_fullscreen">Отключить полноэкранный режим двойным щелчком</string>
+    <string name="es_hid_guide_button">Кнопка гида</string>
+    <string name="es_kernel_allow_avatar_initialization">Разрешить инициализацию аватара</string>
+    <string name="es_storage_force_mount_devkit">Принудительное монтирование Devkit</string>
+    <string name="es_storage_mount_memory_unit">Смонтировать модуль памяти</string>
+    <string name="es_ui_custom_font_path">Путь пользовательского шрифта</string>
+
     <string name="_default">По умолчанию</string>
     <string name="driver_library_path_dialog_add_hint">Добавить пользовательский драйвер (*.zip)</string>
     <string name="es_vulkan_vulkan_lib_path">Путь к библиотеке пользовательского драйвера</string>

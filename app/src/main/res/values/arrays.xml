@@ -414,4 +414,15 @@
         <item>sRGB(CRT)</item>
         <item>BT.709(HDTV)</item>
     </string-array>
+    <string-array name="es_arr_apu_xma_decoder">
+        <item>fake</item>
+        <item>master</item>
+        <item>old</item>
+        <item>new</item>
+    </string-array>
+    <string-array name="es_arr_gpu_readback_resolve">
+        <item>fast</item>
+        <item>full</item>
+        <item>none</item>
+    </string-array>
 </resources>

@@ -1,5 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="es_apu_xma_decoder">ตัวถอดรหัส Xma</string>
+    <string name="es_cpu_disable_context_promotion">ปิดการโปรโมตคอนเท็กซ์</string>
+    <string name="es_cpu_disable_instruction_infocache">ปิดอินโฟแคชคำสั่ง</string>
+    <string name="es_cpu_disable_prefetch_and_cachecontrol">ปิดการดึงล่วงหน้าและการควบคุมแคช</string>
+    <string name="es_cpu_dump_translated_hir_functions">ดัมพ์ฟังก์ชัน HIR ที่แปลแล้ว</string>
+    <string name="es_cpu_emit_inline_mmio_checks">ออกการตรวจสอบ MMIO แบบอินไลน์</string>
+    <string name="es_cpu_emit_mmio_aware_stores_for_recorded_exception_addresses">ออกการจัดเก็บที่รับรู้ MMIO สำหรับที่อยู่ข้อยกเว้นที่บันทึกไว้</string>
+    <string name="es_cpu_enable_early_precompilation">เปิดการคอมไพล์ล่วงหน้าก่อนกำหนด</string>
+    <string name="es_cpu_full_optimization_even_with_debug">การปรับให้เหมาะสมเต็มรูปแบบแม้ขณะดีบัก</string>
+    <string name="es_cpu_ignore_trap_instructions">ละเว้นคำสั่งดักจับ</string>
+    <string name="es_cpu_no_reserved_ops">ไม่มีการดำเนินการที่สำรองไว้</string>
+    <string name="es_cpu_permit_float_constant_evaluation">อนุญาตการประเมินค่าคงที่ทศนิยม</string>
+    <string name="es_cpu_record_mmio_access_exceptions">บันทึกข้อยกเว้นการเข้าถึง MMIO</string>
+    <string name="es_cpu_writable_code_segments">เซกเมนต์โค้ดที่เขียนได้</string>
+    <string name="es_gpu_gpu_allow_invalid_upload_range">GPU อนุญาตช่วงอัปโหลดที่ไม่ถูกต้อง</string>
+    <string name="es_gpu_target_trace_file">ไฟล์ติดตามเป้าหมาย</string>
+    <string name="es_gpu_trace_dump_path">เส้นทางดัมพ์การติดตาม</string>
+    <string name="es_general_allow_game_relative_writes">อนุญาตการเขียนสัมพัทธ์ของเกม</string>
+    <string name="es_general_controller_hotkeys">ปุ่มลัดคอนโทรลเลอร์</string>
+    <string name="es_general_disable_doubleclick_fullscreen">ปิดเต็มหน้าจอด้วยการดับเบิลคลิก</string>
+    <string name="es_hid_guide_button">ปุ่มแนะนำ</string>
+    <string name="es_kernel_allow_avatar_initialization">อนุญาตการเริ่มต้นอวาตาร์</string>
+    <string name="es_storage_force_mount_devkit">บังคับเมานต์ Devkit</string>
+    <string name="es_storage_mount_memory_unit">เมานต์หน่วยความจำ</string>
+    <string name="es_ui_custom_font_path">เส้นทางแบบอักษรกำหนดเอง</string>
+
     <string name="_default">ค่าเริ่มต้น</string>
     <string name="driver_library_path_dialog_add_hint">เพิ่มไดรเวอร์แบบกำหนดเอง (*.zip)</string>
     <string name="es_vulkan_vulkan_lib_path">เส้นทางไลบรารีไดรเวอร์แบบกำหนดเอง</string>

@@ -1,5 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="es_apu_xma_decoder">Penyahkod Xma</string>
+    <string name="es_cpu_disable_context_promotion">Lumpuhkan Promosi Konteks</string>
+    <string name="es_cpu_disable_instruction_infocache">Lumpuhkan Infocache Arahan</string>
+    <string name="es_cpu_disable_prefetch_and_cachecontrol">Lumpuhkan Prefetch dan Kawalan Cache</string>
+    <string name="es_cpu_dump_translated_hir_functions">Longgokkan Fungsi HIR yang Diterjemahkan</string>
+    <string name="es_cpu_emit_inline_mmio_checks">Keluarkan Pemeriksaan MMIO Dalam Talian</string>
+    <string name="es_cpu_emit_mmio_aware_stores_for_recorded_exception_addresses">Keluarkan Stor Sedar MMIO untuk Alamat Pengecualian Direkodkan</string>
+    <string name="es_cpu_enable_early_precompilation">Dayakan Prakompilasi Awal</string>
+    <string name="es_cpu_full_optimization_even_with_debug">Pengoptimuman Penuh Walaupun dengan Nyahpepijat</string>
+    <string name="es_cpu_ignore_trap_instructions">Abaikan Arahan Perangkap</string>
+    <string name="es_cpu_no_reserved_ops">Tiada Operasi Terpelihara</string>
+    <string name="es_cpu_permit_float_constant_evaluation">Benarkan Penilaian Pemalar Float</string>
+    <string name="es_cpu_record_mmio_access_exceptions">Rekodkan Pengecualian Capaian MMIO</string>
+    <string name="es_cpu_writable_code_segments">Segmen Kod Boleh Tulis</string>
+    <string name="es_gpu_gpu_allow_invalid_upload_range">GPU Benarkan Julat Muat Naik Tidak Sah</string>
+    <string name="es_gpu_target_trace_file">Fail Jejak Sasaran</string>
+    <string name="es_gpu_trace_dump_path">Laluan Longgokan Jejak</string>
+    <string name="es_general_allow_game_relative_writes">Benarkan Penulisan Relatif Permainan</string>
+    <string name="es_general_controller_hotkeys">Kekunci Pintasan Kawalan</string>
+    <string name="es_general_disable_doubleclick_fullscreen">Lumpuhkan Skrin Penuh Dwi-klik</string>
+    <string name="es_hid_guide_button">Butang Panduan</string>
+    <string name="es_kernel_allow_avatar_initialization">Benarkan Pengawalan Avatar</string>
+    <string name="es_storage_force_mount_devkit">Paksa Lekapkan Devkit</string>
+    <string name="es_storage_mount_memory_unit">Lekapkan Unit Memori</string>
+    <string name="es_ui_custom_font_path">Laluan Fon Tersuai</string>
+
     <string name="_default">Lalai</string>
     <string name="driver_library_path_dialog_add_hint">Tambah Pemacu Tersuai (*.zip)</string>
     <string name="es_vulkan_vulkan_lib_path">Laluan Pustaka Pemacu Tersuai</string>

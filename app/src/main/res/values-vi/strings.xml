@@ -1,5 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="es_apu_xma_decoder">Bộ giải mã Xma</string>
+    <string name="es_cpu_disable_context_promotion">Tắt quảng bá ngữ cảnh</string>
+    <string name="es_cpu_disable_instruction_infocache">Tắt bộ nhớ đệm thông tin lệnh</string>
+    <string name="es_cpu_disable_prefetch_and_cachecontrol">Tắt tìm nạp trước và điều khiển bộ đệm</string>
+    <string name="es_cpu_dump_translated_hir_functions">Kết xuất các hàm HIR đã dịch</string>
+    <string name="es_cpu_emit_inline_mmio_checks">Phát kiểm tra MMIO nội tuyến</string>
+    <string name="es_cpu_emit_mmio_aware_stores_for_recorded_exception_addresses">Phát lưu trữ nhận biết MMIO cho các địa chỉ ngoại lệ đã ghi</string>
+    <string name="es_cpu_enable_early_precompilation">Bật biên dịch trước sớm</string>
+    <string name="es_cpu_full_optimization_even_with_debug">Tối ưu hóa đầy đủ ngay cả khi gỡ lỗi</string>
+    <string name="es_cpu_ignore_trap_instructions">Bỏ qua lệnh bẫy</string>
+    <string name="es_cpu_no_reserved_ops">Không có thao tác dành riêng</string>
+    <string name="es_cpu_permit_float_constant_evaluation">Cho phép đánh giá hằng số dấu phẩy động</string>
+    <string name="es_cpu_record_mmio_access_exceptions">Ghi lại ngoại lệ truy cập MMIO</string>
+    <string name="es_cpu_writable_code_segments">Đoạn mã có thể ghi</string>
+    <string name="es_gpu_gpu_allow_invalid_upload_range">Cho phép phạm vi tải lên không hợp lệ GPU</string>
+    <string name="es_gpu_target_trace_file">Tệp theo dõi đích</string>
+    <string name="es_gpu_trace_dump_path">Đường dẫn kết xuất theo dõi</string>
+    <string name="es_general_allow_game_relative_writes">Cho phép ghi tương đối trò chơi</string>
+    <string name="es_general_controller_hotkeys">Phím tắt tay cầm</string>
+    <string name="es_general_disable_doubleclick_fullscreen">Tắt nhấp đúp toàn màn hình</string>
+    <string name="es_hid_guide_button">Nút Guide</string>
+    <string name="es_kernel_allow_avatar_initialization">Cho phép khởi tạo Avatar</string>
+    <string name="es_storage_force_mount_devkit">Bắt buộc gắn Devkit</string>
+    <string name="es_storage_mount_memory_unit">Gắn đơn vị bộ nhớ</string>
+    <string name="es_ui_custom_font_path">Đường dẫn phông chữ tùy chỉnh</string>
+
     <string name="_default">Mặc định</string>
     <string name="driver_library_path_dialog_add_hint">Thêm trình điều khiển tùy chỉnh (*.zip)</string>
     <string name="es_vulkan_vulkan_lib_path">Đường dẫn thư viện trình điều khiển tùy chỉnh</string>

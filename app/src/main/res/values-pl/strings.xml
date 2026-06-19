@@ -1,5 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="es_apu_xma_decoder">Dekoder Xma</string>
+    <string name="es_cpu_disable_context_promotion">Wyłącz promocję kontekstu</string>
+    <string name="es_cpu_disable_instruction_infocache">Wyłącz pamięć podręczną instrukcji</string>
+    <string name="es_cpu_disable_prefetch_and_cachecontrol">Wyłącz wstępne pobieranie i kontrolę pamięci podręcznej</string>
+    <string name="es_cpu_dump_translated_hir_functions">Zrzut przetłumaczonych funkcji HIR</string>
+    <string name="es_cpu_emit_inline_mmio_checks">Wystaw sprawdzanie MMIO inline</string>
+    <string name="es_cpu_emit_mmio_aware_stores_for_recorded_exception_addresses">Wystaw zapisy uwzględniające MMIO dla zarejestrowanych adresów wyjątków</string>
+    <string name="es_cpu_enable_early_precompilation">Włącz wczesną prekompilację</string>
+    <string name="es_cpu_full_optimization_even_with_debug">Pełna optymalizacja nawet w trybie debugowania</string>
+    <string name="es_cpu_ignore_trap_instructions">Ignoruj instrukcje pułapki</string>
+    <string name="es_cpu_no_reserved_ops">Brak zarezerwowanych operacji</string>
+    <string name="es_cpu_permit_float_constant_evaluation">Zezwól na ocenę stałych zmiennoprzecinkowych</string>
+    <string name="es_cpu_record_mmio_access_exceptions">Rejestruj wyjątki dostępu MMIO</string>
+    <string name="es_cpu_writable_code_segments">Zapisywalne segmenty kodu</string>
+    <string name="es_gpu_gpu_allow_invalid_upload_range">GPU zezwól na nieprawidłowy zakres przesyłania</string>
+    <string name="es_gpu_target_trace_file">Plik śledzenia docelowego</string>
+    <string name="es_gpu_trace_dump_path">Ścieżka zrzutu śledzenia</string>
+    <string name="es_general_allow_game_relative_writes">Zezwól na zapisy względne gry</string>
+    <string name="es_general_controller_hotkeys">Klawisze skrótu kontrolera</string>
+    <string name="es_general_disable_doubleclick_fullscreen">Wyłącz pełny ekran podwójnym kliknięciem</string>
+    <string name="es_hid_guide_button">Przycisk przewodnika</string>
+    <string name="es_kernel_allow_avatar_initialization">Zezwól na inicjalizację awatara</string>
+    <string name="es_storage_force_mount_devkit">Wymuś montowanie Devkit</string>
+    <string name="es_storage_mount_memory_unit">Montuj jednostkę pamięci</string>
+    <string name="es_ui_custom_font_path">Ścieżka niestandardowej czcionki</string>
+
     <string name="_default">Domyślne</string>
     <string name="driver_library_path_dialog_add_hint">Dodaj niestandardowy sterownik (*.zip)</string>
     <string name="es_vulkan_vulkan_lib_path">Ścieżka biblioteki niestandardowego sterownika</string>

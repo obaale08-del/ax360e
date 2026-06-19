@@ -408,6 +408,8 @@ static const std::pair<std::string,entries> gen_list[]={
                                                ,"1280x768@9","1280x960@10","1280x1024@11","1360x768@12","1440x900@13", "1680x1050@14","1920x540@15","1920x1080@16"}},
                                                /*Kernel = 1, Apu = 2, Cpu = 4.*/
         //{"Logging|log_file"}
+        {"APU|xma_decoder",{"fake", "master", "old", "new"}},
+        {"GPU|readback_resolve",{"fast","full","none"}},
 
 };
 
@@ -426,7 +428,7 @@ static const std::pair<std::string,range> gen_seekbar[]={
 #define SEEKBAR_PREF_TAG "aenu.preference.SeekBarPreference"
 #define CHECKBOX_PREF_TAG "aenu.preference.CheckBoxPreference"
 #define LIST_PREF_TAG "aenu.preference.ListPreference"
-#if 1
+#if 0
 
 static jstring generate_config_xml(JNIEnv* env,jobject self,jstring toml_path){
     return env->NewStringUTF("out.str().c_str()");
@@ -437,7 +439,7 @@ static jstring generate_config_xml(JNIEnv* env,jobject self,jstring toml_path){
     jboolean is_copy=false;
     const char* path=env->GetStringUTFChars(toml_path,&is_copy);
 
-    std::shared_ptr<cpptoml::table> toml=cpptoml::parse_file(path);
+    toml::table* toml = new toml::table(toml::parse_file(path));
     env->ReleaseStringUTFChars(toml_path,path);
 
     std::ostringstream out;
@@ -449,16 +451,17 @@ static jstring generate_config_xml(JNIEnv* env,jobject self,jstring toml_path){
     )";
 
     for(auto table_iter=toml->begin() ;table_iter!=toml->end();table_iter++){
-        const std::string& table_name=table_iter->first;
+        const std::string table_name(table_iter->first);
         if(std::find(std::begin(gen_skips),std::end(gen_skips),table_name)!=std::end(gen_skips))
             continue;
-        std::string table_name_l=table_name; std::transform(table_name_l.begin(),table_name_l.end(),table_name_l.begin(),::tolower);
-        std::shared_ptr<cpptoml::table> table=table_iter->second->as_table();
+        std::string table_name_l(table_name); std::transform(table_name_l.begin(),table_name_l.end(),table_name_l.begin(),::tolower);
+        toml::table* table=table_iter->second.as_table();
         out<<"<PreferenceScreen app:title=\"@string/es_"<<table_name_l<<"\" \n";
+        out<<"app:iconSpaceReserved=\"false\" \n";
         out<<"app:key=\""<<table_name<<"\" >\n";
 
         for(auto iter=table->begin();iter!=table->end();iter++){
-            const std::string& key_name=iter->first;
+            const std::string key_name(iter->first);
             const std::string find_key=table_name+"|"+key_name;
             if(std::find(std::begin(gen_skips),std::end(gen_skips),find_key)!=std::end(gen_skips))
                 continue;
@@ -477,6 +480,7 @@ static jstring generate_config_xml(JNIEnv* env,jobject self,jstring toml_path){
                         out<<"app:entryValues=\"@array/es_arr_"<<table_name_l<<"_"<<key_name<<"\" \n";
                     }
                     out<<"app:entries=\"@array/es_arr_"<<table_name_l<<"_"<<key_name<<"\" \n";
+                    out<<"app:iconSpaceReserved=\"false\" \n";
                     out<<"app:key=\""<<table_name<<"|"<<key_name<<"\" />\n";
                     continue;
                 }
@@ -492,6 +496,7 @@ static jstring generate_config_xml(JNIEnv* env,jobject self,jstring toml_path){
                     out<<"app:min=\""<<find_iter->second.first<<"\"\n";
                     out<<"android:max=\""<<find_iter->second.second<<"\"\n";
                     out<<"app:showSeekBarValue=\"true\"\n";
+                    out<<"app:iconSpaceReserved=\"false\" \n";
                     out<<"app:key=\""<<table_name<<"|"<<key_name<<"\" />\n";
                     continue;
                 }
@@ -500,6 +505,7 @@ static jstring generate_config_xml(JNIEnv* env,jobject self,jstring toml_path){
             if(const auto val=table->get_as<bool>(key_name);val){
                 std::string val_str=*val?"true":"false";
                 out<<"<" CHECKBOX_PREF_TAG " app:title=\"@string/es_"<<table_name_l<<"_"<<key_name<<"\" \n";
+                out<<"app:iconSpaceReserved=\"false\" \n";
                 out<<"app:key=\""<<table_name<<"|"<<key_name<<"\" />\n";
             }
             /*else if(const auto val=table->get_as<int>(key_name);val){
@@ -510,11 +516,13 @@ static jstring generate_config_xml(JNIEnv* env,jobject self,jstring toml_path){
             else if(const auto val=table->get_as<double>(key_name);val){
                 //FIXME
                 out<<"<PreferenceScreen app:title=\"@string/es_"<<table_name_l<<"_"<<key_name<<"\" \n";
+                out<<"app:iconSpaceReserved=\"false\" \n";
                 out<<"app:key=\""<<table_name<<"|"<<key_name<<"\" />\n";
             }
             else if(const auto val=table->get_as<std::string>(key_name);val){
                 //FIXME
                 out<<"<PreferenceScreen app:title=\"@string/es_"<<table_name_l<<"_"<<key_name<<"\" \n";
+                out<<"app:iconSpaceReserved=\"false\" \n";
                 out<<"app:key=\""<<table_name<<"|"<<key_name<<"\" />\n";
             }
         }
@@ -529,12 +537,12 @@ static jstring generate_config_xml(JNIEnv* env,jobject self,jstring toml_path){
 
     out<<"final String[] BOOL_KEYS={\n";
     for(auto table_iter=toml->begin() ;table_iter!=toml->end();table_iter++){
-        const std::string& table_name=table_iter->first;
-        std::shared_ptr<cpptoml::table> table=table_iter->second->as_table();
+        const std::string table_name(table_iter->first);
+        toml::table* table=table_iter->second.as_table();
         if(std::find(std::begin(gen_skips),std::end(gen_skips),table_name)!=std::end(gen_skips))
             continue;
         for(auto iter=table->begin();iter!=table->end();iter++){
-            const std::string& key_name=iter->first;
+            const std::string key_name(iter->first);
             const std::string find_key=table_name+"|"+key_name;
             if(std::find(std::begin(gen_skips),std::end(gen_skips),find_key)!=std::end(gen_skips))
                 continue;
@@ -547,12 +555,12 @@ static jstring generate_config_xml(JNIEnv* env,jobject self,jstring toml_path){
 
     out<<"final String[] INT_KEYS={\n";
     for(auto table_iter=toml->begin() ;table_iter!=toml->end();table_iter++){
-        const std::string& table_name=table_iter->first;
-        std::shared_ptr<cpptoml::table> table=table_iter->second->as_table();
+        const std::string table_name(table_iter->first);
+        toml::table* table=table_iter->second.as_table();
         if(std::find(std::begin(gen_skips),std::end(gen_skips),table_name)!=std::end(gen_skips))
             continue;
         for(auto iter=table->begin();iter!=table->end();iter++){
-            const std::string& key_name=iter->first;
+            const std::string key_name(iter->first);
             const std::string find_key=table_name+"|"+key_name;
             if(std::find(std::begin(gen_skips),std::end(gen_skips),find_key)!=std::end(gen_skips))
                 continue;
@@ -571,12 +579,12 @@ static jstring generate_config_xml(JNIEnv* env,jobject self,jstring toml_path){
     out<<"};\n";
     out<<"final String[] STRING_ARR_KEYS={\n";
     for(auto table_iter=toml->begin() ;table_iter!=toml->end();table_iter++){
-        const std::string& table_name=table_iter->first;
-        std::shared_ptr<cpptoml::table> table=table_iter->second->as_table();
+        const std::string table_name(table_iter->first);
+        toml::table* table=table_iter->second.as_table();
         if(std::find(std::begin(gen_skips),std::end(gen_skips),table_name)!=std::end(gen_skips))
             continue;
             for(auto iter=table->begin();iter!=table->end();iter++){
-                const std::string& key_name=iter->first;
+                const std::string key_name(iter->first);
                 const std::string find_key=table_name+"|"+key_name;
                 if(std::find(std::begin(gen_skips),std::end(gen_skips),find_key)!=std::end(gen_skips))
                     continue;
@@ -593,7 +601,7 @@ static jstring generate_config_xml(JNIEnv* env,jobject self,jstring toml_path){
     }
     out<<"};\n";
 
-#if 0
+#if 1
     //STRING XML
     out<<"\n\n\n\n";
 
@@ -611,31 +619,31 @@ static jstring generate_config_xml(JNIEnv* env,jobject self,jstring toml_path){
     };
 
     for(auto table_iter=toml->begin() ;table_iter!=toml->end();table_iter++){
-        const std::string& table_name=table_iter->first;
+        const std::string table_name(table_iter->first);
         std::string table_name_l=table_name;
         std::transform(table_name_l.begin(),table_name_l.end(),table_name_l.begin(),::tolower);
         out<<"<string name=\"es_"<<table_name_l<<"\">"<<table_name<<"</string>\n";
 
-        std::shared_ptr<cpptoml::table> table=table_iter->second->as_table();
+        toml::table* table=table_iter->second.as_table();
         for(auto iter=table->begin();iter!=table->end();iter++){
-            const std::string& key_name=iter->first;
+            const std::string key_name(iter->first);
             out<<"<string name=\"es_"<<table_name_l<<"_"<<key_name<<"\">"<<convert_to_name(key_name)<<"</string>\n";
         }
     }
 
 #endif
-#if 0
+#if 1
     //STRING ARRAY XML
     out<<"\n\n\n\n";
 
     for(auto table_iter=toml->begin() ;table_iter!=toml->end();table_iter++){
-        const std::string& table_name=table_iter->first;
+        const std::string table_name(table_iter->first);
         std::string table_name_l=table_name;
         std::transform(table_name_l.begin(),table_name_l.end(),table_name_l.begin(),::tolower);
 
-        std::shared_ptr<cpptoml::table> table=table_iter->second->as_table();
+        toml::table* table=table_iter->second.as_table();
         for(auto iter=table->begin();iter!=table->end();iter++){
-            const std::string& key_name=iter->first;
+            const std::string key_name(iter->first);
             auto find_iter=std::begin(gen_list);
             find_iter=std::find_if(find_iter,std::end(gen_list),[&table_name,&key_name](const std::pair<std::string,entries>& entry){
                 return entry.first==table_name+"|"+key_name;

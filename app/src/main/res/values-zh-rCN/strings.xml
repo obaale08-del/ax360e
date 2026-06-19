@@ -1,5 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="es_apu_xma_decoder">Xma 解码器</string>
+    <string name="es_cpu_disable_context_promotion">禁用上下文提升</string>
+    <string name="es_cpu_disable_instruction_infocache">禁用指令信息缓存</string>
+    <string name="es_cpu_disable_prefetch_and_cachecontrol">禁用预取和缓存控制</string>
+    <string name="es_cpu_dump_translated_hir_functions">转储已翻译的 HIR 函数</string>
+    <string name="es_cpu_emit_inline_mmio_checks">内联 MMIO 检查</string>
+    <string name="es_cpu_emit_mmio_aware_stores_for_recorded_exception_addresses">为已记录的异常地址生成 MMIO 感知存储</string>
+    <string name="es_cpu_enable_early_precompilation">启用早期预编译</string>
+    <string name="es_cpu_full_optimization_even_with_debug">即使在调试模式下也进行完整优化</string>
+    <string name="es_cpu_ignore_trap_instructions">忽略陷阱指令</string>
+    <string name="es_cpu_no_reserved_ops">无保留操作</string>
+    <string name="es_cpu_permit_float_constant_evaluation">允许浮点常量求值</string>
+    <string name="es_cpu_record_mmio_access_exceptions">记录 MMIO 访问异常</string>
+    <string name="es_cpu_writable_code_segments">可写代码段</string>
+    <string name="es_gpu_gpu_allow_invalid_upload_range">允许无效的 GPU 上传范围</string>
+    <string name="es_gpu_target_trace_file">目标跟踪文件</string>
+    <string name="es_gpu_trace_dump_path">跟踪转储路径</string>
+    <string name="es_general_allow_game_relative_writes">允许游戏相对写入</string>
+    <string name="es_general_controller_hotkeys">控制器快捷键</string>
+    <string name="es_general_disable_doubleclick_fullscreen">禁用双击全屏</string>
+    <string name="es_hid_guide_button">导航按钮</string>
+    <string name="es_kernel_allow_avatar_initialization">允许 Avatar 初始化</string>
+    <string name="es_storage_force_mount_devkit">强制挂载 Devkit</string>
+    <string name="es_storage_mount_memory_unit">挂载存储单元</string>
+    <string name="es_ui_custom_font_path">自定义字体路径</string>
+
     <string name="_default">默认</string>
     <string name="driver_library_path_dialog_add_hint">添加自定义驱动程序 (*.zip)</string>
     <string name="es_vulkan_vulkan_lib_path">自定义驱动程序库路径</string>

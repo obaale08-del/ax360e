@@ -1,5 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="es_apu_xma_decoder">Xma-decoder</string>
+    <string name="es_cpu_disable_context_promotion">Contextpromotie uitschakelen</string>
+    <string name="es_cpu_disable_instruction_infocache">Instructie-infocache uitschakelen</string>
+    <string name="es_cpu_disable_prefetch_and_cachecontrol">Prefetch en cachebeheer uitschakelen</string>
+    <string name="es_cpu_dump_translated_hir_functions">Vertaalde HIR-functies dumpen</string>
+    <string name="es_cpu_emit_inline_mmio_checks">Inline MMIO-controles uitvoeren</string>
+    <string name="es_cpu_emit_mmio_aware_stores_for_recorded_exception_addresses">MMIO-bewuste opslag uitvoeren voor geregistreerde uitzonderingsadressen</string>
+    <string name="es_cpu_enable_early_precompilation">Vroege precompilatie inschakelen</string>
+    <string name="es_cpu_full_optimization_even_with_debug">Volledige optimalisatie zelfs met debug</string>
+    <string name="es_cpu_ignore_trap_instructions">Trap-instructies negeren</string>
+    <string name="es_cpu_no_reserved_ops">Geen gereserveerde bewerkingen</string>
+    <string name="es_cpu_permit_float_constant_evaluation">Evaluatie van floating-point constanten toestaan</string>
+    <string name="es_cpu_record_mmio_access_exceptions">MMIO-toegangsuitzonderingen registreren</string>
+    <string name="es_cpu_writable_code_segments">Beschrijfbare codesegmenten</string>
+    <string name="es_gpu_gpu_allow_invalid_upload_range">GPU ongeldig uploadbereik toestaan</string>
+    <string name="es_gpu_target_trace_file">Doel-tracebestand</string>
+    <string name="es_gpu_trace_dump_path">Trace-dump pad</string>
+    <string name="es_general_allow_game_relative_writes">Spel-relatieve schrijfacties toestaan</string>
+    <string name="es_general_controller_hotkeys">Controller-sneltoetsen</string>
+    <string name="es_general_disable_doubleclick_fullscreen">Dubbelklik volledig scherm uitschakelen</string>
+    <string name="es_hid_guide_button">Gids-knop</string>
+    <string name="es_kernel_allow_avatar_initialization">Avatar-initialisatie toestaan</string>
+    <string name="es_storage_force_mount_devkit">Devkit-koppeling afdwingen</string>
+    <string name="es_storage_mount_memory_unit">Geheugeneenheid koppelen</string>
+    <string name="es_ui_custom_font_path">Aangepast lettertypepad</string>
+
     <string name="_default">Standaard</string>
     <string name="driver_library_path_dialog_add_hint">Aangepast stuurprogramma toevoegen (*.zip)</string>
     <string name="es_vulkan_vulkan_lib_path">Pad aangepast stuurprogrammabibliotheek</string>

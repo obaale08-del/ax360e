@@ -1,5 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="es_apu_xma_decoder">Xma 디코더</string>
+    <string name="es_cpu_disable_context_promotion">컨텍스트 프로모션 비활성화</string>
+    <string name="es_cpu_disable_instruction_infocache">명령어 인포캐시 비활성화</string>
+    <string name="es_cpu_disable_prefetch_and_cachecontrol">프리페치 및 캐시 제어 비활성화</string>
+    <string name="es_cpu_dump_translated_hir_functions">번역된 HIR 함수 덤프</string>
+    <string name="es_cpu_emit_inline_mmio_checks">인라인 MMIO 검사 출력</string>
+    <string name="es_cpu_emit_mmio_aware_stores_for_recorded_exception_addresses">기록된 예외 주소에 대한 MMIO 인식 스토어 출력</string>
+    <string name="es_cpu_enable_early_precompilation">초기 사전 컴파일 활성화</string>
+    <string name="es_cpu_full_optimization_even_with_debug">디버그 중에도 완전 최적화</string>
+    <string name="es_cpu_ignore_trap_instructions">트랩 명령어 무시</string>
+    <string name="es_cpu_no_reserved_ops">예약된 작업 없음</string>
+    <string name="es_cpu_permit_float_constant_evaluation">부동소수점 상수 평가 허용</string>
+    <string name="es_cpu_record_mmio_access_exceptions">MMIO 접근 예외 기록</string>
+    <string name="es_cpu_writable_code_segments">쓰기 가능한 코드 세그먼트</string>
+    <string name="es_gpu_gpu_allow_invalid_upload_range">GPU 잘못된 업로드 범위 허용</string>
+    <string name="es_gpu_target_trace_file">대상 추적 파일</string>
+    <string name="es_gpu_trace_dump_path">추적 덤프 경로</string>
+    <string name="es_general_allow_game_relative_writes">게임 상대적 쓰기 허용</string>
+    <string name="es_general_controller_hotkeys">컨트롤러 단축키</string>
+    <string name="es_general_disable_doubleclick_fullscreen">더블 클릭 전체화면 비활성화</string>
+    <string name="es_hid_guide_button">가이드 버튼</string>
+    <string name="es_kernel_allow_avatar_initialization">아바타 초기화 허용</string>
+    <string name="es_storage_force_mount_devkit">Devkit 마운트 강제</string>
+    <string name="es_storage_mount_memory_unit">메모리 유닛 마운트</string>
+    <string name="es_ui_custom_font_path">사용자 지정 글꼴 경로</string>
+
     <string name="_default">기본값</string>
     <string name="driver_library_path_dialog_add_hint">사용자 지정 드라이버 추가 (*.zip)</string>
     <string name="es_vulkan_vulkan_lib_path">사용자 지정 드라이버 라이브러리 경로</string>

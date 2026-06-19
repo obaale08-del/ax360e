@@ -5,7 +5,17 @@ enable_xmp = true                                 	# Enables Music Player playba
 ffmpeg_verbose = false                            	# Verbose FFmpeg output (debug and above)
 mute = false                                      	# Mutes all audio output.
 use_dedicated_xma_thread = true                   	# Enables XMA decoding on separate thread. Disabled should produce better results, but decrease performance a bit.
-use_new_decoder = false                           	# Enables usage of new experimental XMA audio decoder.
+xma_decoder = "old"                               	# Decoder version used to process XMA audio.
+                                                  	# Use: [fake, master, old, new]
+                                                  	#  fake: 
+                                                  	#   No audio will be decoded.
+                                                  	#  master: 
+                                                  	#   Version of decoder exactly like on base version of Xenia.
+                                                  	#  old: 
+                                                  	#   Decoder based on master version of decoder with few improvements.
+                                                  	#  new: 
+                                                  	#   New version of decoder. Provides highest stability, but isn't yet finished.
+
 xmp_default_volume = 70                           	# Default music volume if game doesn't set it [0-100].
 
 
@@ -20,18 +30,33 @@ break_on_start = false                            	# Break into the debugger on 
 break_on_unimplemented_instructions = true        	# Break to the host debugger (or crash if no debugger attached) if an unimplemented PowerPC instruction is encountered.
 clock_no_scaling = false                          	# Disable scaling code. Time management and locking is bypassed. Guest system time is directly pulled from host.
 clock_source_raw = false                          	# On x64, Use the RDTSC instruction as the time source. Requires invariant TSC. On a64, Use the CNTVCT_EL0 register as the time source
-cpu = "any"                                       	# CPU backend [any, x64, a64].
-debugprint_trap_log = false                       	# Log debugprint traps to the active debugger
-disable_global_lock = false                       	# Disables global lock usage in guest code. Does not affect host code.
+cpu = "any"                                       	# Does nothing. CPU backend [any, x64].
+disable_context_promotion = false                 	# Disables Context Promotion optimizations, this may be needed for some sports games, but will reduce performance.
+disable_instruction_infocache = false             	# Disables caching records of called instructions/mmio accesses.
+disable_prefetch_and_cachecontrol = true          	# Disables translating ppc prefetch/cache flush instructions to host prefetch/cacheflush instructions. This may improve performance as these instructions were written with the Xbox 360's cache in mind, and modern processors do their own automatic prefetching.
 disassemble_functions = false                     	# Disassemble functions during generation.
-ignore_undefined_externs = true                   	# Don't exit when an undefined extern is called.
+dump_translated_hir_functions = false             	# dumps translated hir
+emit_inline_mmio_checks = false                   	# Emit inline MMIO range checks for all I32 loads/stores instead of relying on exception-based MMIO detection.
+emit_mmio_aware_stores_for_recorded_exception_addresses = true	# Uses info gathered via record_mmio_access_exceptions to emit special stores that are faster than trapping the exception
+enable_early_precompilation = false               	# Enable pre-compiling guest functions that we know we've called/that we've recognized as being functions via simple heuristics, good for error finding/stress testing with the JIT
+full_optimization_even_with_debug = false         	# For developer use to analyze the quality of the generated code, not intended for actual debugging of the code
+ignore_trap_instructions = true                   	# Generate no code for powerpc trap instructions, can result in better performance in games that aggressively check with trap.
 inline_mmio_access = true                         	# Inline constant MMIO loads and stores.
 load_module_map = ""                              	# Loads a .map for symbol names and to diff with the generated symbol database.
-pvr = 7407360                                     	# Processor version and revision number.
+no_reserved_ops = false                           	# For testing whether a game may have races with a broken reserved load/store impl
+permit_float_constant_evaluation = false          	# Allow float constant evaluation, may produce incorrect results and break games math
+pvr = 7407360                                     	# Known PVR's.
+                                                  	#  0x710200 = Used by Zephyr 
+                                                  	#  0x710300 = Used by Zephyr
+                                                  	#  0x710500 = Used by Jasper
+                                                  	#  0x710700 = Default
+                                                  	#  0x710800 = Used by Corona V1 & V2
+                                                  	# Processor version and revision number.
                                                   	# Bits 0 to 15 are the version number.
                                                   	# Bits 16 to 31 are the revision number.
                                                   	# Note: Some XEXs (such as mfgbootlauncher.xex) may check for a value that's less than 0x710700.
 
+record_mmio_access_exceptions = true              	# For guest addresses records whether we caught any mmio accesses for them. This info can then be used on a subsequent run to instruct the recompiler to emit checks
 store_all_context_values = false                  	# Don't strip dead context stores to aid in debugging.
 trace_function_coverage = false                   	# Generate tracing for function instruction coverage statistics.
 trace_function_data = false                       	# Generate tracing for function result data.
@@ -39,10 +64,11 @@ trace_function_data_path = ""                     	# File to write trace data to
 trace_function_references = false                 	# Generate tracing for function address references.
 trace_functions = false                           	# Generate tracing for function statistics.
 validate_hir = false                              	# Perform validation checks on the HIR during compilation.
+writable_code_segments = false                    	# Enables a program to write to its own code segments in memory.
 
 
 [Config]
-defaults_date = 2020123113                        	# Do not modify - internal version of the default values in the config, for seamless updates if default value of any option is changed.
+defaults_date = 2026040912                        	# Do not modify - internal version of the default values in the config, for seamless updates if default value of any option is changed.
 
 
 [Content]
@@ -93,8 +119,8 @@ postprocess_scaling_and_sharpening = ""           	# Post-processing effect to u
 
 present_letterbox = true                          	# Maintain aspect ratio when stretching by displaying bars around the image when there's no more overscan area to crop out.
 present_render_pass_clear = true                  	# On graphics backends where this is supported, use the clear render pass load operation in presentation instead of clear commands clearing only the letterbox area.
-present_safe_area_x = 90                          	# Percentage of the image width that can be kept when presenting to maintain aspect ratio without letterboxing or stretching.
-present_safe_area_y = 90                          	# Percentage of the image height that can be kept when presenting to maintain aspect ratio without letterboxing or stretching.
+present_safe_area_x = 100                         	# Percentage of the image width that can be kept when presenting to maintain aspect ratio without letterboxing or stretching.
+present_safe_area_y = 100                         	# Percentage of the image height that can be kept when presenting to maintain aspect ratio without letterboxing or stretching.
 
 
 [GPU]
@@ -161,6 +187,7 @@ framerate_limit = 0                               	# Maximum frames per second. 
 gamma_render_target_as_srgb = false               	# When the host can't write piecewise linear gamma directly with correct blending, use sRGB output on the host for conceptually correct blending in linear color space while having slightly different precision distribution in the render target and severely incorrect values if the game accesses the resulting colors directly as raw data.
 gpu = "vulkan"                                    	# Graphics system. Use: [vulkan, null]
 gpu_allow_invalid_fetch_constants = true          	# Allow texture and vertex fetch constants with invalid type - generally unsafe because the constant may contain completely invalid values, but may be used to bypass fetch constant type errors in certain games until the real reason why they're invalid is found.
+gpu_allow_invalid_upload_range = false            	# Allows games to read data from pages that are marked as no access.
 half_pixel_offset = true                          	# Enable support of vertex half-pixel offset (D3D9 PA_SU_VTX_CNTL PIX_CENTER). Generally games are aware of the half-pixel offset, and having this enabled is the correct behavior (disabling this may significantly break post-processing in some games), but in certain games it might have been ignored, resulting in slight blurriness of UI textures, for instance, when they are read between texels rather than at texel centers, or the leftmost/topmost pixels may not be fully covered when MSAA is used with fullscreen passes.
 ignore_32bit_vertex_index_support = false         	# For host graphics API downlevel testing only (useful only for Qualcomm Adreno 4xx-level host GPU testing), force indirection or pre-masking and pre-swapping of 32-bit vertex indices as if the host only supports 24-bit indices.
 log_guest_driven_gpu_register_written_values = false	# Only does anything in debug builds, if set will log every write to a gpu register done by a guest. Does not log writes that are done by the CP on its own, just ones the guest makes or instructs it to make.
@@ -178,8 +205,12 @@ primitive_processor_cache_min_indices = 4096      	# Smallest number of guest in
 
 query_occlusion_sample_lower_threshold = 80       	# If set to -1 no sample counts are written, games may hang. Else, the sample count of every tile will be incremented on every EVENT_WRITE_ZPD by this number. Setting this to 0 means everything is reported as occluded.
 query_occlusion_sample_upper_threshold = 100      	# Set to higher number than query_occlusion_sample_lower_threshold. This value is ignored if query_occlusion_sample_lower_threshold is set to -1.
-readback_memexport = false                        	# [D3D12 Only] Read data written by memory export in shaders on the CPU. This may be needed in some games (but many only access exported data on the GPU, and this flag isn't needed to handle such behavior), but causes mid-frame synchronization, so it has a huge performance impact.
-readback_resolve = false                          	# [D3D12 Only] Read render-to-texture results on the CPU. This may be needed in some games, for instance, for screenshots in saved games, but causes mid-frame synchronization, so it has a huge performance impact.
+readback_memexport = false                        	# Read data written by memory export in shaders on the CPU. This may be needed in some games (but many only access exported data on the GPU, and this flag isn't needed to handle such behavior), but causes mid-frame synchronization, so it has a huge performance impact.
+readback_resolve = "none"                         	# Controls CPU readback of render-to-texture resolve results.
+                                                  	#  fast: Read from previous frame (1 frame delay, no GPU stall, slight performance hit)
+                                                  	#  full: Wait for GPU to finish (accurate but slow, GPU-CPU sync stall)
+                                                  	#  none: Disable readback completely (some games render better without it)
+
 render_target_path_vulkan = ""                    	# Render target emulation path to use on Vulkan.
                                                   	# Use: [any, fbo, fsi]
                                                   	#  fbo:
@@ -197,28 +228,36 @@ render_target_path_vulkan = ""                    	# Render target emulation pat
 resolve_resolution_scale_fill_half_pixel_offset = true	# When using resolution scaling, apply the hack that stretches the first surely covered host pixel in the left and top sides of render target resolve areas to eliminate the gap caused by the half-pixel offset (this is necessary for certain games to display the scene graphics).
 snorm16_render_target_full_range = true           	# When the host can only support 16_16 and 16_16_16_16 render targets as -1...1, remap -32...32 to -1...1 to use the full possible range of values, at the expense of multiplicative blending correctness.
 store_shaders = true                              	# Store shaders persistently and load them when loading games to avoid runtime spikes and freezes when playing the game not for the first time.
+target_trace_file = ""                            	# Specifies the trace file to load.
 texture_cache_memory_limit_hard = 768             	# Maximum host texture memory usage (in megabytes) above which textures will be destroyed as soon as possible.
 texture_cache_memory_limit_render_to_texture = 24 	# Part of the host texture memory budget (in megabytes) that will be scaled by the current drawing resolution scale.
                                                   	# If texture_cache_memory_limit_soft, for instance, is 384, and this is 24, it will be assumed that the game will be using roughly 24 MB of render-to-texture (resolve) targets and 384 - 24 = 360 MB of regular textures - so with 2x2 resolution scaling, the soft limit will be 360 + 96 MB, and with 3x3, it will be 360 + 216 MB.
 
 texture_cache_memory_limit_soft = 384             	# Maximum host texture memory usage (in megabytes) above which old textures will be destroyed.
 texture_cache_memory_limit_soft_lifetime = 30     	# Seconds a texture should be unused to be considered old enough to be deleted if texture memory usage exceeds texture_cache_memory_limit_soft.
+trace_dump_path = ""                              	# Output path for dumped files.
 trace_gpu_prefix = "scratch/gpu/"                 	# Prefix path for GPU trace files.
 trace_gpu_stream = false                          	# Trace all GPU packets.
 vsync = true                                      	# Enable VSYNC.
 
 
 [General]
+allow_game_relative_writes = false                	# Not useful to non-developers. Allows code to write to paths relative to game://. Used for generating test data to compare with original hardware. 
 allow_plugins = false                             	# Allows loading of plugins/trainers from plugins\title_id\plugin.xex. Plugin are homebrew xex modules which can be used for making mods. This feature is experimental.
 apply_patches = true                              	# Enables custom patching functionality
+controller_hotkeys = false                        	# Hotkeys for Xbox and PS controllers.
 debug = false                                     	# Allow debugging and retain debug information.
+disable_doubleclick_fullscreen = false            	# Allows the user to disable the behavior where a fast double-click causes Xenia to enter fullscreen mode.
 discord = false                                   	# Enable Discord rich presence
 launch_module = ""                                	# Executable to launch from the .iso or the package instead of default.xex or the module specified by the game. Leave blank to launch the default module.
 notification_sound_path = ""                      	# Path (including filename) to selected notification sound. Sound MUST be in wav format!
+priority_class = 0                                	# Forces Xenia to use different process priority than default one. It might affect performance and cause unexpected bugs. Possible values: 0 - Normal, 1 - Above normal, 2 - High
+recent_titles_entry_amount = 10                   	# Allows user to define how many titles is saved in list of recently played titles.
 time_scalar = 1                                   	# Scalar used to speed or slow time (1x, 2x, 1/2x, etc).
 
 
 [HID]
+guide_button = true                               	# Forward guide button presses to guest.
 hid = "android"                                   	# Input system. Use: [android, nop]
 left_stick_deadzone_percentage = 0                	# Defines deadzone level for left stick. Allowed range [0.0-1.0].
 right_stick_deadzone_percentage = 0               	# Defines deadzone level for right stick. Allowed range [0.0-1.0].
@@ -226,16 +265,21 @@ vibration = true                                  	# Toggle controller vibration
 
 
 [Kernel]
-Allow_nui_initialization = false                  	# Enable NUI initialization
+allow_avatar_initialization = false               	# Enable Avatar Initialization
+                                                  	#  Only set true when testing Avatar games. Certain games may
+                                                  	#  require kinect implementation.
+
+allow_incompatible_title_update = true            	# Allow title updates with mismatched signatures to be applied.
+allow_nui_initialization = false                  	# Enable NUI initialization
                                                   	#  Only set true when testing kinect games. Certain games may
                                                   	#  require avatar implementation.
 
-allow_incompatible_title_update = true            	# Allow title updates with mismatched signatures to be applied.
 apply_title_update = true                         	# Apply title updates.
 cl = ""                                           	# Specify additional command-line provided to guest.
+console_type = 0                                  	# Console Type Identifier: 0 - Development Kit, 1 - Test Kit
 default_achievements_backend = "GPD"              	# Defines which achievements backend should be used as an default. Possible options: GPD.
 ignore_thread_affinities = true                   	# Ignores game-specified thread affinities.
-ignore_thread_priorities = true                   	# Ignores game-specified thread priorities.
+ignore_thread_priorities = false                  	# Ignores game-specified thread priorities.
 kernel_build_version = 1888                       	# Define current kernel version
 kernel_cert_monitor = false                       	# Enable cert monitor.
 kernel_debug_monitor = false                      	# Enable debug monitor.
@@ -250,7 +294,7 @@ staging_mode = false                              	# Enables preview mode in das
 flush_log = true                                  	# Flush log file after each log line batch.
 log_file = ""                                     	# Logs are written to the given file
 log_level = 2                                     	# Maximum level to be logged. (0=error, 1=warning, 2=info, 3=debug)
-log_mask = 0                                      	# Disables specific categorizes for more granular debug logging. Kernel = 1, Apu = 2, Cpu = 4.
+log_mask = 0                                      	# Disables specific categorizes for more granular debug logging. Kernel = 1, Apu = 2, Cpu = 4, Gpu = 8.
 log_string_format_kernel_calls = false            	# Log kernel calls with the kHighFrequency tag.
 log_to_debugprint = false                         	# Dump the log to DebugPrint.
 log_to_stdout = true                              	# Write log output to stdout
@@ -261,7 +305,8 @@ ignore_offset_for_ranged_allocations = false      	# Allows to ignore 4k offset 
 mmap_address_high = 8                             	# 1-124
 protect_on_release = false                        	# Protect released memory to prevent accesses.
 protect_zero = true                               	# Protect the zero page from reads and writes.
-scribble_heap = false                             	# Scribble 0xCD into all allocated heap memory.
+scribble_heap = false                             	# Scribble specific or random value into all allocated heap memory.
+scribble_heap_value = 0                           	# Value used to fill all allocated heap memory. 0 - Random value. Valid range: [1-255]
 writable_executable_memory = true                 	# Allow mapping memory with both write and execute access, for simulating behavior on platforms where that's not supported
 
 
@@ -275,13 +320,17 @@ logged_profile_slot_3_xuid = ""                   	# XUID of the profile to load
 [Storage]
 cache_root = ""                                   	# Root path for files used to speed up certain parts of the emulator or the game. These files may be persistent, but they can be deleted without major side effects such as progress loss. If empty, the cache folder under the storage root, or, if available, the cache directory preferred for the OS, will be used.
 content_root = ""                                 	# Root path for guest content storage (saves, etc.), or empty to use the content folder under the storage root.
+force_mount_devkit = false                        	# Force devkit mount
 mount_cache = false                               	# Enable cache mount
+mount_memory_unit = false                         	# Enable memory unit (MU) mount
 mount_scratch = false                             	# Enable scratch mount
 storage_root = ""                                 	# Root path for persistent internal data storage (config, etc.), or empty to use the path preferred for the OS, such as the documents folder, or the emulator executable directory if portable.txt is present in it.
 
 
 [UI]
-headless = true                                  	# Don't display any UI, using defaults for prompts as needed.
+custom_font_path = ""                             	# Allows user to load custom font and use it instead of default one.
+font_size = 14                                    	# Allows user to set custom font size.
+headless = true                                   	# Don't display any UI, using defaults for prompts as needed.
 profiler_dpi_scaling = false                      	# Apply window DPI scaling to the profiler.
 show_achievement_notification = false             	# Show achievement notification on screen.
 show_profiler = false                             	# Show profiling UI by default.
@@ -382,11 +431,11 @@ user_language = 1                                 	# User language ID.
 
 
 [a64]
+a64_enable_host_guest_stack_synchronization = true	# Records entries for guest/host stack mappings at function starts and checks for reentry at return sites. Has slight performance impact, but fixes crashes in games that use setjmp/longjmp.
 a64_extension_mask = -1                           	# Allow the detection and utilization of specific instruction set features.
                                                   	#     0 = armv8.0
-                                                  	#     1 = LSE
-                                                  	#     2 = F16C
+                                                  	#     1 = Large System Extensions(LSE) atomic operations
+                                                  	#     2 = FPCR.FZ flushes denormal inputs (skip software flush)
                                                   	#    -1 = Detect and utilize all possible processor features
 
-enable_host_guest_stack_synchronization = false   	# Records entries for guest/host stack mappings at function starts and checks for reentry at return sites. Has slight performance impact, but fixes crashes in games that use setjmp/longjmp.
-max_stackpoints = 65536                           	# Max number of host->guest stack mappings we can record.
+a64_max_stackpoints = 65536                       	# Max number of host->guest stack mappings we can record.

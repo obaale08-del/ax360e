@@ -1,5 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="es_apu_xma_decoder">Decodificador Xma</string>
+    <string name="es_cpu_disable_context_promotion">Desactivar Promoción de Contexto</string>
+    <string name="es_cpu_disable_instruction_infocache">Desactivar Caché de Información de Instrucciones</string>
+    <string name="es_cpu_disable_prefetch_and_cachecontrol">Desactivar Precarga y Control de Caché</string>
+    <string name="es_cpu_dump_translated_hir_functions">Volcar Funciones HIR Traducidas</string>
+    <string name="es_cpu_emit_inline_mmio_checks">Emitir Verificaciones MMIO en Línea</string>
+    <string name="es_cpu_emit_mmio_aware_stores_for_recorded_exception_addresses">Emitir Almacenamientos Conscientes de MMIO para Direcciones de Excepción Registradas</string>
+    <string name="es_cpu_enable_early_precompilation">Activar Precompilación Temprana</string>
+    <string name="es_cpu_full_optimization_even_with_debug">Optimización Completa Incluso con Depuración</string>
+    <string name="es_cpu_ignore_trap_instructions">Ignorar Instrucciones de Trampa</string>
+    <string name="es_cpu_no_reserved_ops">Sin Operaciones Reservadas</string>
+    <string name="es_cpu_permit_float_constant_evaluation">Permitir Evaluación de Constantes Flotantes</string>
+    <string name="es_cpu_record_mmio_access_exceptions">Registrar Excepciones de Acceso MMIO</string>
+    <string name="es_cpu_writable_code_segments">Segmentos de Código Escribibles</string>
+    <string name="es_gpu_gpu_allow_invalid_upload_range">GPU Permitir Rango de Carga Inválido</string>
+    <string name="es_gpu_target_trace_file">Archivo de Rastreo de Objetivo</string>
+    <string name="es_gpu_trace_dump_path">Ruta de Volcado de Rastreo</string>
+    <string name="es_general_allow_game_relative_writes">Permitir Escrituras Relativas al Juego</string>
+    <string name="es_general_controller_hotkeys">Teclas de Acceso Rápido del Controlador</string>
+    <string name="es_general_disable_doubleclick_fullscreen">Desactivar Pantalla Completa con Doble Clic</string>
+    <string name="es_hid_guide_button">Botón Guía</string>
+    <string name="es_kernel_allow_avatar_initialization">Permitir Inicialización de Avatar</string>
+    <string name="es_storage_force_mount_devkit">Forzar Montaje de Devkit</string>
+    <string name="es_storage_mount_memory_unit">Montar Unidad de Memoria</string>
+    <string name="es_ui_custom_font_path">Ruta de Fuente Personalizada</string>
+
     <string name="_default">Predeterminado</string>
     <string name="driver_library_path_dialog_add_hint">Agregar controlador personalizado (*.zip)</string>
     <string name="es_vulkan_vulkan_lib_path">Ruta de la biblioteca de controladores personalizados</string>

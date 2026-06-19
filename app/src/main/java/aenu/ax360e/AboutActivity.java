@@ -63,6 +63,8 @@ public class AboutActivity extends AppCompatActivity {
                 +"1.16(2026-05-15)\n"
                 + " *切换至xenia canary\n"
                 + " *部分修正\n"
+                +"1.17(2026-06-20)\n"
+                + " *部分修正\n"
                 + " \n";
 
         return log;

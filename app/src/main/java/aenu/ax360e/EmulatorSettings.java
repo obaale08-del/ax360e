@@ -76,6 +76,7 @@ public class EmulatorSettings extends AppCompatActivity {
         final PreferenceDataStore data_store=new PreferenceDataStore(){
 
             public void putString(String key, @Nullable String value) {
+                if(config==null) return;
                 config.save_config_entry(key,value);
             }
 
@@ -84,6 +85,7 @@ public class EmulatorSettings extends AppCompatActivity {
             }
 
             public void putInt(String key, int value) {
+                if(config==null) return;
                 config.save_config_entry(key,Integer.toString(value));
             }
 
@@ -96,11 +98,13 @@ public class EmulatorSettings extends AppCompatActivity {
             }
 
             public void putBoolean(String key, boolean value) {
+                if(config==null) return;
                 config.save_config_entry(key,Boolean.toString(value));
             }
 
             @Nullable
             public String getString(String key, @Nullable String defValue) {
+                if(config==null) return defValue;
                 return config.load_config_entry(key);
             }
 
@@ -111,6 +115,7 @@ public class EmulatorSettings extends AppCompatActivity {
             }
 
             public int getInt(String key, int defValue) {
+                if(config==null) return defValue;
                 String v=config.load_config_entry(key);
                 return v!=null?Integer.parseInt(v):defValue;
             }
@@ -124,6 +129,7 @@ public class EmulatorSettings extends AppCompatActivity {
             }
 
             public boolean getBoolean(String key, boolean defValue) {
+                if(config==null) return defValue;
                 String v=config.load_config_entry(key);
                 return v!=null?Boolean.parseBoolean(v):defValue;
             }
@@ -132,6 +138,7 @@ public class EmulatorSettings extends AppCompatActivity {
         Preference reset_as_default_pref(File _config_file){
             Preference p=new Preference(requireContext());
             p.setTitle(R.string.reset_as_default);
+            p.setIconSpaceReserved(false);
             p.setOnPreferenceClickListener(new Preference.OnPreferenceClickListener(){
                 public boolean onPreferenceClick(@NonNull Preference preference) {
                     new AlertDialog.Builder(requireContext())
@@ -162,6 +169,7 @@ public class EmulatorSettings extends AppCompatActivity {
         Preference reset_as_global_pref(){
             Preference p=new Preference(requireContext());
             p.setTitle(R.string.use_global_config);
+            p.setIconSpaceReserved(false);
             p.setOnPreferenceClickListener(new Preference.OnPreferenceClickListener(){
                 public boolean onPreferenceClick(@NonNull Preference preference) {
                     new AlertDialog.Builder(requireContext())
@@ -205,7 +213,7 @@ public class EmulatorSettings extends AppCompatActivity {
         public void onCreatePreferences(@Nullable Bundle savedInstanceState, @Nullable String rootKey) {
 
             if(rootKey!=null) throw new RuntimeException();
-
+            getPreferenceManager().setPreferenceDataStore(data_store);
             setPreferencesFromResource(R.xml.emulator_settings, rootKey);
             root_pref=getPreferenceScreen();
 
@@ -237,127 +245,145 @@ public class EmulatorSettings extends AppCompatActivity {
 
 
             final String[] BOOL_KEYS={
-                    "Vulkan|vulkan_sparse_shared_memory",
-                    "Vulkan|vulkan_log_debug_messages",
-                    "Vulkan|vulkan_validation",
-                    "Vulkan|vulkan_allow_present_mode_immediate",
-                    "Vulkan|vulkan_allow_present_mode_mailbox",
-                    "Vulkan|vulkan_allow_present_mode_fifo_relaxed",
-                    "Video|widescreen",
-                    "Video|use_50Hz_mode",
-                    "Video|interlaced",
-                    "Video|enable_3d_mode",
-                    "UI|show_profiler",
-                    "UI|show_achievement_notification",
-                    "UI|profiler_dpi_scaling",
-                    "UI|storage_selection_dialog",
-                    "UI|headless",
-                    "Storage|mount_scratch",
-                    "Storage|mount_cache",
-                    "Kernel|staging_mode",
-                    "Kernel|log_high_frequency_kernel_calls",
-                    "Kernel|ignore_thread_affinities",
-                    "Kernel|kernel_pix",
-                    "Kernel|kernel_cert_monitor",
-                    "Kernel|ignore_thread_priorities",
-                    "Kernel|allow_incompatible_title_update",
-                    "Kernel|apply_title_update",
-                    "Kernel|kernel_debug_monitor",
-                    "Kernel|Allow_nui_initialization",
-                    "Memory|scribble_heap",
-                    "Memory|protect_zero",
-                    "Memory|writable_executable_memory",
-                    "Memory|protect_on_release",
-                    "Memory|ignore_offset_for_ranged_allocations",
-                    "Display|present_letterbox",
-                    "Display|postprocess_dither",
-                    "Display|present_render_pass_clear",
-                    "Display|host_present_from_non_ui_thread",
-                    "Display|fullscreen",
-                    "GPU|vsync",
-                    "GPU|store_shaders",
-                    "GPU|resolve_resolution_scale_fill_half_pixel_offset",
-                    "GPU|readback_resolve",
-                    "GPU|snorm16_render_target_full_range",
-                    "GPU|native_2x_msaa",
-                    "GPU|half_pixel_offset",
-                    "GPU|log_ringbuffer_kickoff_initiator_bts",
-                    "GPU|gpu_allow_invalid_fetch_constants",
-                    "GPU|log_guest_driven_gpu_register_written_values",
-                    "GPU|trace_gpu_stream",
-                    "GPU|force_convert_quad_lists_to_triangle_lists",
-                    "GPU|ignore_32bit_vertex_index_support",
-                    "GPU|execute_unclipped_draw_vs_on_cpu_with_scissor",
-                    "GPU|mrt_edram_used_range_clamp_to_min",
-                    "GPU|gamma_render_target_as_srgb",
-                    "GPU|execute_unclipped_draw_vs_on_cpu",
-                    "GPU|readback_memexport",
-                    "GPU|force_convert_triangle_fans_to_lists",
-                    "GPU|disassemble_pm4",
-                    "GPU|non_seamless_cube_map",
-                    "GPU|depth_float24_round",
-                    "GPU|clear_memory_page_state",
-                    "GPU|depth_transfer_not_equal_test",
-                    "GPU|native_stencil_value_output",
-                    "GPU|force_convert_line_loops_to_strips",
-                    "GPU|execute_unclipped_draw_vs_on_cpu_for_psi_render_backend",
-                    "GPU|draw_resolution_scaled_texture_offsets",
-                    "GPU|depth_float24_convert_in_pixel_shader",
-                    "CPU|validate_hir",
-                    "CPU|trace_function_references",
-                    "CPU|trace_functions",
-                    "CPU|trace_function_coverage",
-                    "CPU|store_all_context_values",
-                    "CPU|ignore_undefined_externs",
-                    "CPU|debugprint_trap_log",
-                    "CPU|break_condition_truncate",
-                    "CPU|clock_source_raw",
-                    "CPU|disassemble_functions",
-                    "CPU|break_on_unimplemented_instructions",
-                    "CPU|break_on_start",
-                    "CPU|inline_mmio_access",
-                    "CPU|disable_global_lock",
-                    "CPU|break_on_debugbreak",
-                    "CPU|clock_no_scaling",
-                    "Logging|log_to_stdout",
-                    "Logging|log_to_debugprint",
-                    "Logging|log_string_format_kernel_calls",
-                    "Logging|flush_log",
-                    "General|allow_plugins",
-                    "General|debug",
-                    "General|discord",
-                    "General|apply_patches",
+                    "APU|enable_xmp",
                     "APU|ffmpeg_verbose",
                     "APU|mute",
-                    "APU|enable_xmp",
-                    "APU|use_new_decoder",
                     "APU|use_dedicated_xma_thread",
+                    "CPU|break_condition_truncate",
+                    "CPU|break_on_debugbreak",
+                    "CPU|break_on_start",
+                    "CPU|break_on_unimplemented_instructions",
+                    "CPU|clock_no_scaling",
+                    "CPU|clock_source_raw",
+                    "CPU|disable_context_promotion",
+                    "CPU|disable_instruction_infocache",
+                    "CPU|disable_prefetch_and_cachecontrol",
+                    "CPU|disassemble_functions",
+                    "CPU|dump_translated_hir_functions",
+                    "CPU|emit_inline_mmio_checks",
+                    "CPU|emit_mmio_aware_stores_for_recorded_exception_addresses",
+                    "CPU|enable_early_precompilation",
+                    "CPU|full_optimization_even_with_debug",
+                    "CPU|ignore_trap_instructions",
+                    "CPU|inline_mmio_access",
+                    "CPU|no_reserved_ops",
+                    "CPU|permit_float_constant_evaluation",
+                    "CPU|record_mmio_access_exceptions",
+                    "CPU|store_all_context_values",
+                    "CPU|trace_function_coverage",
+                    "CPU|trace_function_references",
+                    "CPU|trace_functions",
+                    "CPU|validate_hir",
+                    "CPU|writable_code_segments",
+                    "Display|fullscreen",
+                    "Display|host_present_from_non_ui_thread",
+                    "Display|postprocess_dither",
+                    "Display|present_letterbox",
+                    "Display|present_render_pass_clear",
+                    "GPU|clear_memory_page_state",
+                    "GPU|depth_float24_convert_in_pixel_shader",
+                    "GPU|depth_float24_round",
+                    "GPU|depth_transfer_not_equal_test",
+                    "GPU|disassemble_pm4",
+                    "GPU|draw_resolution_scaled_texture_offsets",
+                    "GPU|execute_unclipped_draw_vs_on_cpu",
+                    "GPU|execute_unclipped_draw_vs_on_cpu_for_psi_render_backend",
+                    "GPU|execute_unclipped_draw_vs_on_cpu_with_scissor",
+                    "GPU|force_convert_line_loops_to_strips",
+                    "GPU|force_convert_quad_lists_to_triangle_lists",
+                    "GPU|force_convert_triangle_fans_to_lists",
+                    "GPU|gamma_render_target_as_srgb",
+                    "GPU|gpu_allow_invalid_fetch_constants",
+                    "GPU|gpu_allow_invalid_upload_range",
+                    "GPU|half_pixel_offset",
+                    "GPU|ignore_32bit_vertex_index_support",
+                    "GPU|log_guest_driven_gpu_register_written_values",
+                    "GPU|log_ringbuffer_kickoff_initiator_bts",
+                    "GPU|mrt_edram_used_range_clamp_to_min",
+                    "GPU|native_2x_msaa",
+                    "GPU|native_stencil_value_output",
+                    "GPU|non_seamless_cube_map",
+                    "GPU|readback_memexport",
+                    "GPU|resolve_resolution_scale_fill_half_pixel_offset",
+                    "GPU|snorm16_render_target_full_range",
+                    "GPU|store_shaders",
+                    "GPU|trace_gpu_stream",
+                    "GPU|vsync",
+                    "General|allow_game_relative_writes",
+                    "General|allow_plugins",
+                    "General|apply_patches",
+                    "General|controller_hotkeys",
+                    "General|debug",
+                    "General|disable_doubleclick_fullscreen",
+                    "General|discord",
+                    "HID|guide_button",
+                    "Kernel|allow_avatar_initialization",
+                    "Kernel|allow_incompatible_title_update",
+                    "Kernel|allow_nui_initialization",
+                    "Kernel|apply_title_update",
+                    "Kernel|ignore_thread_affinities",
+                    "Kernel|ignore_thread_priorities",
+                    "Kernel|kernel_cert_monitor",
+                    "Kernel|kernel_debug_monitor",
+                    "Kernel|kernel_pix",
+                    "Kernel|log_high_frequency_kernel_calls",
+                    "Kernel|staging_mode",
+                    "Logging|flush_log",
+                    "Logging|log_string_format_kernel_calls",
+                    "Logging|log_to_debugprint",
+                    "Logging|log_to_stdout",
+                    "Memory|ignore_offset_for_ranged_allocations",
+                    "Memory|protect_on_release",
+                    "Memory|protect_zero",
+                    "Memory|scribble_heap",
+                    "Memory|writable_executable_memory",
+                    "Storage|force_mount_devkit",
+                    "Storage|mount_cache",
+                    "Storage|mount_memory_unit",
+                    "Storage|mount_scratch",
+                    "UI|headless",
+                    "UI|profiler_dpi_scaling",
+                    "UI|show_achievement_notification",
+                    "UI|show_profiler",
+                    "UI|storage_selection_dialog",
+                    "Video|enable_3d_mode",
+                    "Video|interlaced",
+                    "Video|use_50Hz_mode",
+                    "Video|widescreen",
                     "Vulkan|adrenotools_force_max_clocks",
+                    "Vulkan|vulkan_allow_present_mode_fifo_relaxed",
+                    "Vulkan|vulkan_allow_present_mode_immediate",
+                    "Vulkan|vulkan_allow_present_mode_mailbox",
+                    "Vulkan|vulkan_log_debug_messages",
+                    "Vulkan|vulkan_sparse_shared_memory",
+                    "Vulkan|vulkan_validation",
             };
             final String[] INT_KEYS={
-                    "Memory|mmap_address_high",
-                    "GPU|texture_cache_memory_limit_soft",
-                    "GPU|texture_cache_memory_limit_hard",
-                    "General|time_scalar",
-                    "APU|xmp_default_volume",
                     "APU|apu_max_queued_frames",
+                    "APU|xmp_default_volume",
+                    "GPU|texture_cache_memory_limit_hard",
+                    "GPU|texture_cache_memory_limit_soft",
+                    "General|time_scalar",
+                    "Memory|mmap_address_high",
             };
             final String[] STRING_ARR_KEYS={
-                    "Video|video_standard",
-                    "Video|internal_display_resolution",
-                    "Video|avpack",
-                    "Kernel|kernel_display_gamma_type",
-                    "HID|hid",
-                    "XConfig|user_language",
-                    "XConfig|user_country",
-                    "Display|postprocess_scaling_and_sharpening",
-                    "Display|postprocess_antialiasing",
-                    "GPU|render_target_path_vulkan",
-                    "GPU|gpu",
-                    "CPU|cpu",
-                    "Logging|log_level",
-                    "Content|license_mask",
                     "APU|apu",
+                    "APU|xma_decoder",
+                    "CPU|cpu",
+                    "Content|license_mask",
+                    "Display|postprocess_antialiasing",
+                    "Display|postprocess_scaling_and_sharpening",
+                    "GPU|gpu",
+                    "GPU|readback_resolve",
+                    "GPU|render_target_path_vulkan",
+                    "HID|hid",
+                    "Kernel|kernel_display_gamma_type",
+                    "Logging|log_level",
+                    "Video|avpack",
+                    "Video|internal_display_resolution",
+                    "Video|video_standard",
+                    "XConfig|user_country",
+                    "XConfig|user_language",
             };
 
 

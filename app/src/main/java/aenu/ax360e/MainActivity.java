@@ -160,8 +160,8 @@ public class MainActivity extends AppCompatActivity {
         registerForContextMenu(list_view);
         //refresh_game_list();
         show_game_list();
-        /*if(!new File(Application.get_app_data_dir(),"xenia.config.toml").exists()) return;
-        String config_str=Emulator.get.generate_config_xml(new File(Application.get_app_data_dir(),"xenia.config.toml").getAbsolutePath());
+        /*if(!new File(Application.get_app_data_dir(),"xenia-canary.config.toml").exists()) return;
+        String config_str=Emulator.get.generate_config_xml(new File(Application.get_app_data_dir(),"xenia-canary.config.toml").getAbsolutePath());
         File config_file=new File(Application.get_app_data_dir(),"xenia.config.xml");
         Utils.save_string(config_file,config_str);*/
     }

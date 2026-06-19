@@ -1,5 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="es_apu_xma_decoder">Décodeur Xma</string>
+    <string name="es_cpu_disable_context_promotion">Désactiver la Promotion de Contexte</string>
+    <string name="es_cpu_disable_instruction_infocache">Désactiver le Cache d\&apos;Information des Instructions</string>
+    <string name="es_cpu_disable_prefetch_and_cachecontrol">Désactiver la Prélecture et le Contrôle du Cache</string>
+    <string name="es_cpu_dump_translated_hir_functions">Décharger les Fonctions HIR Traduites</string>
+    <string name="es_cpu_emit_inline_mmio_checks">Émettre les Vérifications MMIO en Ligne</string>
+    <string name="es_cpu_emit_mmio_aware_stores_for_recorded_exception_addresses">Émettre les Stockages Conscients de MMIO pour les Adresses d\&apos;Exception Enregistrées</string>
+    <string name="es_cpu_enable_early_precompilation">Activer la Précompilation Précoce</string>
+    <string name="es_cpu_full_optimization_even_with_debug">Optimisation Complète Même avec Débogage</string>
+    <string name="es_cpu_ignore_trap_instructions">Ignorer les Instructions de Piège</string>
+    <string name="es_cpu_no_reserved_ops">Aucune Opération Réservée</string>
+    <string name="es_cpu_permit_float_constant_evaluation">Autoriser l\&apos;Évaluation des Constantes Flottantes</string>
+    <string name="es_cpu_record_mmio_access_exceptions">Enregistrer les Exceptions d\&apos;Accès MMIO</string>
+    <string name="es_cpu_writable_code_segments">Segments de Code Inscriptibles</string>
+    <string name="es_gpu_gpu_allow_invalid_upload_range">GPU Autoriser la Plage de Téléchargement Invalide</string>
+    <string name="es_gpu_target_trace_file">Fichier de Trace Cible</string>
+    <string name="es_gpu_trace_dump_path">Chemin de Déchargement de Trace</string>
+    <string name="es_general_allow_game_relative_writes">Autoriser les Écritures Relatives au Jeu</string>
+    <string name="es_general_controller_hotkeys">Raccourcis du Contrôleur</string>
+    <string name="es_general_disable_doubleclick_fullscreen">Désactiver le Plein Écran par Double-Clic</string>
+    <string name="es_hid_guide_button">Bouton Guide</string>
+    <string name="es_kernel_allow_avatar_initialization">Autoriser l\&apos;Initialisation de l\&apos;Avatar</string>
+    <string name="es_storage_force_mount_devkit">Forcer le Montage du Devkit</string>
+    <string name="es_storage_mount_memory_unit">Monter l\&apos;Unité de Mémoire</string>
+    <string name="es_ui_custom_font_path">Chemin de Police Personnalisé</string>
+
     <string name="_default">Par défaut</string>
     <string name="driver_library_path_dialog_add_hint">Ajouter un pilote personnalisé (*.zip)</string>
     <string name="es_vulkan_vulkan_lib_path">Chemin de la bibliothèque de pilotes personnalisés</string>

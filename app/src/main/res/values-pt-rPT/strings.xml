@@ -1,5 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="es_apu_xma_decoder">Descodificador Xma</string>
+    <string name="es_cpu_disable_context_promotion">Desativar Promoção de Contexto</string>
+    <string name="es_cpu_disable_instruction_infocache">Desativar Cache de Informações de Instruções</string>
+    <string name="es_cpu_disable_prefetch_and_cachecontrol">Desativar Pré-busca e Controlo de Cache</string>
+    <string name="es_cpu_dump_translated_hir_functions">Despejar Funções HIR Traduzidas</string>
+    <string name="es_cpu_emit_inline_mmio_checks">Emitir Verificações MMIO Inline</string>
+    <string name="es_cpu_emit_mmio_aware_stores_for_recorded_exception_addresses">Emitir Armazenamentos Cientes de MMIO para Endereços de Exceção Registados</string>
+    <string name="es_cpu_enable_early_precompilation">Ativar Pré-compilação Antecipada</string>
+    <string name="es_cpu_full_optimization_even_with_debug">Otimização Completa Mesmo com Depuração</string>
+    <string name="es_cpu_ignore_trap_instructions">Ignorar Instruções de Armadilha</string>
+    <string name="es_cpu_no_reserved_ops">Sem Operações Reservadas</string>
+    <string name="es_cpu_permit_float_constant_evaluation">Permitir Avaliação de Constantes Flutuantes</string>
+    <string name="es_cpu_record_mmio_access_exceptions">Registar Exceções de Acesso MMIO</string>
+    <string name="es_cpu_writable_code_segments">Segmentos de Código Graváveis</string>
+    <string name="es_gpu_gpu_allow_invalid_upload_range">GPU Permitir Intervalo de Carregamento Inválido</string>
+    <string name="es_gpu_target_trace_file">Ficheiro de Rastreamento do Alvo</string>
+    <string name="es_gpu_trace_dump_path">Caminho de Despejo do Rastreamento</string>
+    <string name="es_general_allow_game_relative_writes">Permitir Escritas Relativas ao Jogo</string>
+    <string name="es_general_controller_hotkeys">Teclas de Atalho do Controlador</string>
+    <string name="es_general_disable_doubleclick_fullscreen">Desativar Ecrã Completo com Duplo Clique</string>
+    <string name="es_hid_guide_button">Botão Guia</string>
+    <string name="es_kernel_allow_avatar_initialization">Permitir Inicialização do Avatar</string>
+    <string name="es_storage_force_mount_devkit">Forçar Montagem do Devkit</string>
+    <string name="es_storage_mount_memory_unit">Montar Unidade de Memória</string>
+    <string name="es_ui_custom_font_path">Caminho do Tipo de Letra Personalizado</string>
+
     <string name="_default">Predefinição</string>
     <string name="driver_library_path_dialog_add_hint">Adicionar Controlador Personalizado (*.zip)</string>
     <string name="es_vulkan_vulkan_lib_path">Caminho da Biblioteca de Controlador Personalizado</string>
