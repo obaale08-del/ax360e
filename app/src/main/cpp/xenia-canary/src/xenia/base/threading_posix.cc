@@ -964,12 +964,14 @@ class PosixCondition<Thread> final : public PosixConditionBase {
   static void* ThreadStartRoutine(void* parameter);
   bool signaled() const override { return signaled_; }
   void post_execution() override {
-    if (thread_) {
+    if (thread_&&!execed) {
       pthread_join(thread_, nullptr);
+      execed=true;
     }
     sem_destroy(&suspend_sem_);
   }
   pthread_t thread_;
+  bool execed= false;
   pid_t tid_ = 0;                     // Kernel TID for setpriority() fallback
   mutable bool fifo_failed_ = false;  // True after SCHED_FIFO was rejected
   bool signaled_;
