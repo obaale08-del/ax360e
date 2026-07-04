@@ -20,6 +20,10 @@ jobs:
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y glslang-tools
 
+      - name: Fix Python build script
+        run: |
+          sed -i 's/sys.stderr.write(result.stderr)/sys.stderr.write(result.stderr.decode("utf-8"))/' app/src/main/cpp/xenia-canary/tools/build/compile_shader_spirv.py
+
       - name: Build with Gradle
         run: ./gradlew assembleDebug
 
