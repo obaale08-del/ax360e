@@ -112,7 +112,7 @@ def main():
 
         # Step 2: spirv-opt
         result = subprocess.run([
-            spirv_opt, "-O", "-O", "--canonicalize-ids",
+            spirv_opt, "-O", "-O", 
             glslang_spv, "-o", opt_spv,
         ], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         if result.returncode != 0:
