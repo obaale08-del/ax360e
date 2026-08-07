@@ -649,40 +649,24 @@ AppOpenAdManager.getInstance(this).showAdIfAvailable( this);}
             DocumentFile[] files=iso_dir.listFiles();
             for(DocumentFile file:files){
                 if(file.isDirectory()){
-                    /*
+
                     DocumentFile default_xex_file=Filter.get_default_xex_file(file);
                     if(default_xex_file==null) continue;
-                    Emulator.GameInfo meta=Emulator.get.meta_info_from_xex_game(context,default_xex_file.getUri(),iso_dir);
+                    Emulator.GameInfo meta=Emulator.get.meta_info_from_xex_game(context,default_xex_file.getUri().toString());
                     if(meta!=null){
                         if(meta.name== null){
                             meta.name=file.getName();
                         }
                         metas.add(meta);
-                    }*/
-
-                    DocumentFile default_xex_file=Filter.get_default_xex_file(file);
-                    if(default_xex_file==null) continue;
-
-                    try{
-                        Emulator.GameInfo meta=new Emulator.GameInfo();
-                        meta.uri=default_xex_file.getUri().toString();
-                        meta.name=file.getName();
-                        ParcelFileDescriptor pfd = context.getContentResolver().openFileDescriptor(default_xex_file.getUri(), "r");
-                        meta.title_id=Emulator.get.title_id_from_xex(pfd.getFd());
-                        pfd.close();
-                        metas.add(meta);
-                    }
-                    catch (Exception e){
-                        e.printStackTrace();
                     }
                 }
                 else{
                     if(Filter.is_iso_file(file.getName())){
-                        Emulator.GameInfo meta=Emulator.get.meta_info_from_iso_game(context,file);
+                        Emulator.GameInfo meta=Emulator.get.meta_info_from_iso_game(context,file.getUri().toString());
                         if(meta!=null) metas.add(meta);
                     }
                     if(Filter.is_zar_file(file.getName())){
-                        Emulator.GameInfo meta=Emulator.get.meta_info_from_zar_game(context,file);
+                        Emulator.GameInfo meta=Emulator.get.meta_info_from_zar_game(context,file.getUri().toString());
                         if(meta!=null) metas.add(meta);
                     }
                     else if(Filter.is_god_game(file.getName())){

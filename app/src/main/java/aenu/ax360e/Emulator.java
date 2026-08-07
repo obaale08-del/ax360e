@@ -55,11 +55,9 @@ public class Emulator extends aenu.emulator.Emulator{
 
 
     public native GameInfo meta_info_from_god_game(Context ctx,String uri) throws RuntimeException;
-    public native GameInfo meta_info_from_iso_game(Context ctx,DocumentFile file) throws RuntimeException;
-    public native GameInfo meta_info_from_zar_game(Context ctx,DocumentFile file) throws RuntimeException;
-    public native GameInfo meta_info_from_xex_game(Context ctx,Uri boot_xex,DocumentFile document_file_tree) throws RuntimeException;
-    public native String title_id_from_xex(int fd);
-
+    public native GameInfo meta_info_from_iso_game(Context ctx,String uri) throws RuntimeException;
+    public native GameInfo meta_info_from_zar_game(Context ctx,String uri) throws RuntimeException;
+    public native GameInfo meta_info_from_xex_game(Context ctx,String boot_xex_uri) throws RuntimeException;
 
     public static class GameInfo{
 
