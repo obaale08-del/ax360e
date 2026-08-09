@@ -102,6 +102,7 @@ enum class SignalType {
 #endif
   k_Count
 };
+
 int GetSystemSignal(SignalType num) {
   auto result = SIGRTMIN + static_cast<int>(num);
   assert_true(result < SIGRTMAX);
@@ -164,6 +165,36 @@ void Sleep(std::chrono::microseconds duration) {
 }
 
 void NanoSleep(int64_t duration) { Sleep(std::chrono::nanoseconds(duration)); }
+
+void NanoSleepPrecise(int64_t ns) {
+#if XE_PLATFORM_MAC
+  // Darwin's nanosleep can oversleep by 100-500us under load. Land precisely
+  // on the deadline by using mach_wait_until for the bulk of the wait and
+  // busy-waiting the last ~200us.
+  if (ns <= 0) {
+    return;
+  }
+  static const mach_timebase_info_data_t tb = [] {
+    mach_timebase_info_data_t i;
+    mach_timebase_info(&i);
+    return i;
+  }();
+  constexpr uint64_t kSpinTailNs = 200'000;
+  const uint64_t deadline =
+      mach_absolute_time() +
+      static_cast<uint64_t>((static_cast<__uint128_t>(ns) * tb.denom) /
+                            tb.numer);
+  const uint64_t spin_tail = static_cast<uint64_t>(
+      (static_cast<__uint128_t>(kSpinTailNs) * tb.denom) / tb.numer);
+  if (deadline > mach_absolute_time() + spin_tail) {
+    mach_wait_until(deadline - spin_tail);
+  }
+  while (mach_absolute_time() < deadline) {
+  }
+#else
+  NanoSleep(ns);
+#endif
+}
 
 // TODO(bwrsandman) Implement by allowing alert interrupts from IO operations
 thread_local bool alertable_state_ = false;
@@ -431,7 +462,9 @@ class PosixCondition<Semaphore> final : public PosixConditionBase {
     if (count_ + release_count > maximum_count_) {
       return false;
     }
-    if (out_previous_count) *out_previous_count = count_;
+    if (out_previous_count) {
+      *out_previous_count = count_;
+    }
     count_ += release_count;
     cond_.notify_all();
     return true;
@@ -597,7 +630,9 @@ class PosixCondition<Thread> final : public PosixConditionBase {
                   ThreadStartData* start_data) {
     start_data->create_suspended = params.create_suspended;
     pthread_attr_t attr;
-    if (pthread_attr_init(&attr) != 0) return false;
+    if (pthread_attr_init(&attr) != 0) {
+      return false;
+    }
     if (pthread_attr_setstacksize(&attr, params.stack_size) != 0) {
       pthread_attr_destroy(&attr);
       return false;
@@ -796,8 +831,12 @@ class PosixCondition<Thread> final : public PosixConditionBase {
     // Center: fifo 16 → nice 0.
     int nice_val = 16 - new_priority;
     // Clamp to valid nice range.
-    if (nice_val < -20) nice_val = -20;
-    if (nice_val > 19) nice_val = 19;
+    if (nice_val < -20) {
+      nice_val = -20;
+    }
+    if (nice_val > 19) {
+      nice_val = 19;
+    }
     if (tid_ > 0) {
       setpriority(PRIO_PROCESS, tid_, nice_val);
     }
@@ -1045,9 +1084,13 @@ WaitResult Wait(WaitHandle* wait_handle, bool is_alertable,
   if (posix_wait_handle == nullptr) {
     return WaitResult::kFailed;
   }
-  if (is_alertable) alertable_state_ = true;
+  if (is_alertable) {
+    alertable_state_ = true;
+  }
   auto result = posix_wait_handle->condition().Wait(timeout);
-  if (is_alertable) alertable_state_ = false;
+  if (is_alertable) {
+    alertable_state_ = false;
+  }
   return result;
 }
 
@@ -1063,11 +1106,15 @@ WaitResult SignalAndWait(WaitHandle* wait_handle_to_signal,
       posix_wait_handle_to_wait_on == nullptr) {
     return WaitResult::kFailed;
   }
-  if (is_alertable) alertable_state_ = true;
+  if (is_alertable) {
+    alertable_state_ = true;
+  }
   if (posix_wait_handle_to_signal->condition().Signal()) {
     result = posix_wait_handle_to_wait_on->condition().Wait(timeout);
   }
-  if (is_alertable) alertable_state_ = false;
+  if (is_alertable) {
+    alertable_state_ = false;
+  }
   return result;
 }
 
@@ -1084,10 +1131,14 @@ std::pair<WaitResult, size_t> WaitMultiple(WaitHandle* wait_handles[],
     }
     conditions.push_back(&handle->condition());
   }
-  if (is_alertable) alertable_state_ = true;
+  if (is_alertable) {
+    alertable_state_ = true;
+  }
   auto result = PosixConditionBase::WaitMultiple(std::move(conditions),
                                                  wait_all, timeout);
-  if (is_alertable) alertable_state_ = false;
+  if (is_alertable) {
+    alertable_state_ = false;
+  }
   return result;
 }
 
@@ -1326,7 +1377,9 @@ std::unique_ptr<Thread> Thread::Create(CreationParameters params,
   install_signal_handler(SignalType::kThreadTerminate);
 #endif
   auto thread = std::make_unique<PosixThread>();
-  if (!thread->Initialize(params, std::move(start_routine))) return nullptr;
+  if (!thread->Initialize(params, std::move(start_routine))) {
+    return nullptr;
+  }
   assert_not_null(thread);
   return thread;
 }

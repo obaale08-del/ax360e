@@ -31,6 +31,7 @@
 #include "xenia/kernel/xam/user_profile.h"
 #include "xenia/kernel/xam/xam_state.h"
 #include "xenia/kernel/xam/xdbf/spa_info.h"
+#include "xenia/kernel/xconfig.h"
 #include "xenia/kernel/xevent.h"
 #include "xenia/vfs/virtual_file_system.h"
 
@@ -96,21 +97,13 @@ struct TerminateNotification {
 // a bit like the timers on KUSER_SHARED on normal win32
 // https://www.geoffchappell.com/studies/windows/km/ntoskrnl/inc/api/ntexapi_x/kuser_shared_data/index.htm
 struct X_TIME_STAMP_BUNDLE {
+  // according to Nukernl these are BE
   uint64_t interrupt_time;
   // i assume system_time is in 100 ns intervals like on win32
   uint64_t system_time;
   uint32_t tick_count;
   uint32_t padding;
 };
-struct X_UNKNOWN_TYPE_REFED {
-  xe::be<uint32_t> field0;
-  xe::be<uint32_t> field4;
-  // this is definitely a LIST_ENTRY?
-  xe::be<uint32_t> points_to_self;  // this field points to itself
-  xe::be<uint32_t>
-      points_to_prior;  // points to the previous field, which points to itself
-};
-static_assert_size(X_UNKNOWN_TYPE_REFED, 16);
 
 struct KernelGuestGlobals {
   X_OBJECT_TYPE ExThreadObjectType;
@@ -125,7 +118,7 @@ struct KernelGuestGlobals {
   X_OBJECT_TYPE ObSymbolicLinkObjectType;
   // a constant buffer that some object types' "unknown_size_or_object" field
   // points to
-  X_UNKNOWN_TYPE_REFED OddObj;
+  X_DISPATCH_HEADER XboxKernelDefaultObject;
   X_KPROCESS idle_process;    // X_PROCTYPE_IDLE. runs in interrupt contexts. is
                               // also the context the kernel starts in?
   X_KPROCESS title_process;   // X_PROCTYPE_TITLE
@@ -182,6 +175,7 @@ class KernelState {
   vfs::VirtualFileSystem* file_system() const { return file_system_; }
 
   uint32_t title_id() const;
+  bool is_title_open() const;
   const std::unique_ptr<xam::SpaInfo> title_xdbf() const;
   const std::unique_ptr<xam::SpaInfo> module_xdbf(
       object_ref<UserModule> exec_module) const;
@@ -200,6 +194,8 @@ class KernelState {
 
   XmpVolumePatch* xmp_volume_patch() const { return xmp_volume_patch_.get(); }
   void InitXmpVolumePatch();
+
+  XConfig* xconfig() const { return xconfig_.get(); }
 
   std::bitset<4> GetConnectedUsers() const;
 
@@ -358,6 +354,7 @@ class KernelState {
   std::unique_ptr<xam::XamState> xam_state_;
   std::unique_ptr<SystemManagementController> smc_;
   std::unique_ptr<XmpVolumePatch> xmp_volume_patch_;
+  std::unique_ptr<XConfig> xconfig_;
 
   KernelVersion kernel_version_;
 

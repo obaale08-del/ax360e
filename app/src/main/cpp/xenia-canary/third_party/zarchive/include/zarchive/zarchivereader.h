@@ -31,7 +31,9 @@ public:
 	};
 
 	static ZArchiveReader* OpenFromFile(const std::filesystem::path& path);
+#ifndef _WIN32
 	static ZArchiveReader* OpenFromFile(int fd);
+#endif
 
 	~ZArchiveReader();
 
@@ -66,7 +68,9 @@ private:
 	std::unordered_map<uint64_t, CacheBlock*> m_blockLookup;
 
 	ZArchiveReader(std::ifstream&& file, std::vector<_ZARCHIVE::CompressionOffsetRecord>&& offsetRecords, std::vector<uint8_t>&& nameTable, std::vector<_ZARCHIVE::FileDirectoryEntry>&& fileTree, uint64_t compressedDataOffset, uint64_t compressedDataSize);
+#ifndef _WIN32
 	ZArchiveReader(int fd, std::vector<_ZARCHIVE::CompressionOffsetRecord>&& offsetRecords, std::vector<uint8_t>&& nameTable, std::vector<_ZARCHIVE::FileDirectoryEntry>&& fileTree, uint64_t compressedDataOffset, uint64_t compressedDataSize);
+#endif
 
 	CacheBlock* GetCachedBlock(uint64_t blockIndex);
 	CacheBlock* RecycleLRUBlock(uint64_t newBlockIndex);
@@ -79,7 +83,7 @@ private:
 	static std::string_view GetName(const std::vector<uint8_t>& nameTable, uint32_t nameOffset);
 
 	std::ifstream m_file;
-	int m_fd; // -1 use m_file
+	int m_fd = -1;
 	std::vector<_ZARCHIVE::CompressionOffsetRecord> m_offsetRecords;
 	std::vector<uint8_t> m_nameTable;
 	std::vector<_ZARCHIVE::FileDirectoryEntry> m_fileTree;

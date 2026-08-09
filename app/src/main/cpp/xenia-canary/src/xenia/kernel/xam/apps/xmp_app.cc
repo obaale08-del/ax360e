@@ -8,7 +8,6 @@
  */
 
 #include "xenia/kernel/xam/apps/xmp_app.h"
-#include "xenia/kernel/xthread.h"
 
 #include "xenia/base/logging.h"
 #include "xenia/emulator.h"
@@ -24,12 +23,6 @@ namespace apps {
 XmpApp::XmpApp(KernelState* kernel_state) : App(kernel_state, 0xFA) {}
 
 X_HRESULT XmpApp::XMPGetStatus(uint32_t state_ptr) {
-  if (!XThread::GetCurrentThread()->main_thread()) {
-    // Some stupid games will hammer this on a thread - induce a delay
-    // here to keep from starving real threads.
-    xe::threading::Sleep(std::chrono::milliseconds(1));
-  }
-
   if (!state_ptr) {
     return X_E_INVALIDARG;
   }
@@ -423,11 +416,6 @@ X_HRESULT XmpApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
 
       *playback_controller_locked = !media_player->IsTitleInPlaybackControl();
 
-      if (!XThread::GetCurrentThread()->main_thread()) {
-        // Atrain spawns a thread 82437FD0 to call this in a tight loop forever.
-        xe::threading::Sleep(std::chrono::milliseconds(10));
-      }
-
       // Assert if game is not in control of playback.
       assert_true(media_player->GetPlaybackController() ==
                   apu::PlaybackController::Game);
@@ -486,6 +474,7 @@ X_HRESULT XmpApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
       return X_E_SUCCESS;
     }
     case 0x0007002B: {
+      constexpr uint8_t kMaxSourcesForMediaPlayer = 10;
       // XMPGetMediaSources
       // Called on the NXE and Kinect dashboard after clicking on the picture,
       // video, and music library
@@ -503,7 +492,38 @@ X_HRESULT XmpApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
           args->get_connected_sources_only.get(),
           args->media_resources_ptr.get(), args->max_source.get(),
           args->sources_returned_ptr.get());
-      return X_E_INVALIDARG;
+
+      if (!args->sources_returned_ptr) {
+        return X_E_INVALIDARG;
+      }
+
+      if (!args->media_resources_ptr) {
+        *kernel_state_->memory()->TranslateVirtual<uint32_t*>(
+            args->sources_returned_ptr.get()) = kMaxSourcesForMediaPlayer;
+        return X_E_SUCCESS;
+      }
+
+      if (args->max_source.get() < kMaxSourcesForMediaPlayer) {
+        return 0x80070008;
+      }
+
+      for (uint8_t i = 0; i < kMaxSourcesForMediaPlayer; ++i) {
+        if (!args->get_connected_sources_only) {
+          // There should be some call to handle it, but we ignore it for now.
+        }
+
+        // Some 0xB4 struct, but no idea what it is.
+        auto entry = kernel_state_->memory()->TranslateVirtual<uint32_t*>(
+            args->media_resources_ptr.get() + (i * 0xB4));
+
+        std::memset(entry, 0x0, 0x28);
+        *entry = xe::byte_swap<uint32_t>(i);
+      }
+
+      // We're returning 0 which means there is no source of media available.
+      *kernel_state_->memory()->TranslateVirtual<uint32_t*>(
+          args->sources_returned_ptr.get()) = 0x0;
+      return X_E_SUCCESS;
     }
     case 0x0007002E: {
       assert_true(!buffer_length ||
@@ -514,7 +534,7 @@ X_HRESULT XmpApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
                                            args->size_ptr);
     }
     case 0x0007002F: {
-      // XMPDashInIt
+      // XMPDashInit
       // Called on the start up of all dashboard versions before kinect
       assert_true(!buffer_length || buffer_length == sizeof(XMP_DASH_INIT));
       XMP_DASH_INIT* args = reinterpret_cast<XMP_DASH_INIT*>(buffer);
@@ -522,12 +542,36 @@ X_HRESULT XmpApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
       assert_true(args->xmp_client == apu::XMP_CLIENT::Game ||
                   args->xmp_client == apu::XMP_CLIENT::Dash);
       XELOGD(
-          "XMPDashInIt({:08X}, {:08X}, {:08X}, {:08X}, {:08X}, {:08X}), "
+          "XMPDashInit({:08X}, {:08X}, {:08X}, {:08X}, {:08X}, {:08X}), "
           "unimplemented",
           uint32_t(args->xmp_client.get()), args->buffer_ptr.get(),
           args->buffer_length.get(), args->unk1.get(), args->unk2.get(),
           args->storage_ptr.get());
-      return X_E_INVALIDARG;
+
+      kernel_state_->BroadcastNotification(kXNotificationXmpDashInitChanged, 1);
+      return X_E_SUCCESS;
+    }
+    case 0x00070031: {
+      // XMPGetNumSongsInTitlePlaylist
+      // Song count exist at playlist_ptr->0x78, if playlist_ptr->0xc == 0 or 1
+      // return song count, else return zero
+      assert_true(!buffer_length ||
+                  buffer_length == sizeof(XMP_GET_NUM_SONGS_IN_TITLE_PLAYLIST));
+      XMP_GET_NUM_SONGS_IN_TITLE_PLAYLIST* args =
+          reinterpret_cast<XMP_GET_NUM_SONGS_IN_TITLE_PLAYLIST*>(buffer);
+
+      XELOGD(
+          "XMPGetNumSongsInTitlePlaylist({:08X}, {:08X}, {:08X}), "
+          "unimplemented",
+          uint32_t(args->xmp_client.get()), args->playlist_ptr.get(),
+          args->song_count_ptr.get());
+
+      if (!args->playlist_ptr || !args->song_count_ptr) {
+        return X_E_INVALIDARG;
+      }
+      xe::store_and_swap<uint32_t>(
+          memory_->TranslateVirtual(args->song_count_ptr), 0);
+      return X_E_SUCCESS;
     }
     case 0x0007003D: {
       // XMPCaptureOutput
@@ -558,21 +602,21 @@ X_HRESULT XmpApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
       XELOGD(
           "XMPSetMediaSourceWorkspace({:08X}, {:08X}, {:08X}, {:08X}), "
           "unimplemented",
-          uint32_t(args->xmp_client.get()), args->unk1.get(),
-          args->storage_ptr.get(), args->unk2.get());
-      return X_E_INVALIDARG;
+          uint32_t(args->xmp_client.get()), args->workspace_type.get(),
+          args->storage_ptr.get(), args->storage_length.get());
+      return X_E_SUCCESS;
     }
     case 0x00070053: {
       // Called on the blades dashboard Version 4532-5787 after clicking on the
       // picture or video library. It only receives buffer
       XMP_GET_DASH_INIT_STATE* args =
           reinterpret_cast<XMP_GET_DASH_INIT_STATE*>(buffer);
-      XELOGD("XMPGetDashInItState({:08X}, {:08X})",
+      XELOGD("XMPGetDashInitState({:08X}, {:08X})",
              uint32_t(args->xmp_client.get()), args->dash_init_state_ptr.get());
 
       xe::store_and_swap<uint32_t>(
           memory_->TranslateVirtual(args->dash_init_state_ptr),
-          kernel_state_->emulator()->audio_media_player()->GetDashInItState());
+          kernel_state_->emulator()->audio_media_player()->GetDashInitState());
       return X_E_SUCCESS;
     }
   }

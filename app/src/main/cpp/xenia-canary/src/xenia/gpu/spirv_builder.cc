@@ -10,6 +10,7 @@
 #include "xenia/gpu/spirv_builder.h"
 
 #include "xenia/base/assert.h"
+#include "xenia/gpu/spirv_compatibility.h"
 
 namespace xe {
 namespace gpu {
@@ -99,7 +100,18 @@ spv::Id SpirvBuilder::createTriBuiltinCall(spv::Id result_type,
   return result;
 }
 
-SpirvBuilder::IfBuilder::IfBuilder(spv::Id condition, unsigned int control,
+spv::Id SpirvBuilder::smearFloatConstant(float value, spv::Id value_type) {
+  spv::Id scalar = makeFloatConstant(value);
+  if (!isVectorType(value_type)) {
+    return scalar;
+  }
+  std::vector<spv::Id> components(size_t(getNumTypeComponents(value_type)),
+                                  scalar);
+  return makeCompositeConstant(value_type, components);
+}
+
+SpirvBuilder::IfBuilder::IfBuilder(spv::Id condition,
+                                   spv::SelectionControlMask control,
                                    SpirvBuilder& builder,
                                    unsigned int thenWeight,
                                    unsigned int elseWeight)
@@ -199,9 +211,9 @@ spv::Id SpirvBuilder::IfBuilder::createMergePhi(spv::Id then_variable,
                               getElsePhiParent());
 }
 
-SpirvBuilder::SwitchBuilder::SwitchBuilder(spv::Id selector,
-                                           unsigned int selection_control,
-                                           SpirvBuilder& builder)
+SpirvBuilder::SwitchBuilder::SwitchBuilder(
+    spv::Id selector, spv::SelectionControlMask selection_control,
+    SpirvBuilder& builder)
     : builder_(builder),
       selector_(selector),
       selection_control_(selection_control),

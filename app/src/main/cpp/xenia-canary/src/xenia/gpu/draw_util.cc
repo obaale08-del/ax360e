@@ -14,6 +14,8 @@
 #include "xenia/base/math.h"
 #include "xenia/base/memory.h"
 #include "xenia/gpu/gpu_flags.h"
+#include "xenia/gpu/registers.h"
+#include "xenia/gpu/texture_address.h"
 #include "xenia/gpu/texture_cache.h"
 #include "xenia/ui/graphics_util.h"
 
@@ -24,6 +26,35 @@ DEFINE_bool(
     "surely covered host pixel in the left and top sides of render target "
     "resolve areas to eliminate the gap caused by the half-pixel offset (this "
     "is necessary for certain games to display the scene graphics).",
+    "GPU");
+
+DEFINE_bool(
+    resolve_check_number_format, true,
+    "Require the destination number format to match before using fast color "
+    "resolves.\n"
+    "Fast resolves copy the exact EDRAM bits. If a title resolves unsigned "
+    "color data to a signed or integer destination, enabling this forces full "
+    "resolves in the shader so the destination gets repacked instead.",
+    "GPU");
+
+DEFINE_bool(
+    gamma_decode_pwl_resolve, true,
+    "During 8_8_8_8_GAMMA MSAA color resolves, average the samples in linear "
+    "space instead of averaging the encoded PWL gamma values directly.\n"
+    "This is separate from gamma_render_target_as_unorm16. It only applies "
+    "when a full shader resolve reads an 8_8_8_8_GAMMA EDRAM color source. "
+    "Compatible 8_8_8_8 destinations are written back as PWL gamma.\n"
+    "Leave enabled for games that otherwise look overexposed after gamma "
+    "MSAA resolves. Disable only if it causes a title-specific regression.",
+    "GPU");
+
+DEFINE_bool(
+    depth_bias_shader_offset, false,
+    "Route decal host render target draws with polygon offset through shader "
+    "depth. This avoids Z-fighting in games that rely on tiny depth bias "
+    "values that host fixed function depth bias cannot reproduce reliably."
+    "This likely causes some minor performance penalty, but the cost should "
+    "be minimal if only a small portion of the scene is affected.",
     "GPU");
 
 namespace xe {
@@ -74,6 +105,57 @@ reg::RB_DEPTHCONTROL GetNormalizedDepthControl(const RegisterFile& regs) {
   // Stencil is more complex and is expected to be usually enabled explicitly
   // when needed.
   return depthcontrol;
+}
+
+bool GetHostDepthPolygonOffsetIfNeeded(
+    const RegisterFile& regs, bool primitive_polygonal,
+    reg::RB_DEPTHCONTROL normalized_depth_control,
+    uint32_t normalized_color_mask,
+    HostDepthPolygonOffset& polygon_offset_out) {
+  polygon_offset_out = {};
+  if (!cvars::depth_bias_shader_offset) {
+    return false;
+  }
+
+  const xenos::CompareFunction zfunc = normalized_depth_control.zfunc;
+  // Keep this on the decal-style redraws that need it. Larger use of shader
+  // depth changes early-Z and coverage behavior in places like hair, foliage,
+  // and stencil masked effects.
+  if (!primitive_polygonal || !normalized_depth_control.z_enable ||
+      !(zfunc == xenos::CompareFunction::kLessEqual ||
+        zfunc == xenos::CompareFunction::kGreaterEqual) ||
+      !normalized_color_mask || normalized_depth_control.stencil_enable ||
+      regs.Get<reg::RB_COLORCONTROL>().alpha_to_mask_enable) {
+    return false;
+  }
+
+  auto pa_su_sc_mode_cntl = regs.Get<reg::PA_SU_SC_MODE_CNTL>();
+  if (pa_su_sc_mode_cntl.poly_offset_front_enable) {
+    polygon_offset_out.front_scale =
+        regs.Get<float>(XE_GPU_REG_PA_SU_POLY_OFFSET_FRONT_SCALE);
+    polygon_offset_out.front_offset =
+        regs.Get<float>(XE_GPU_REG_PA_SU_POLY_OFFSET_FRONT_OFFSET);
+  }
+  if (pa_su_sc_mode_cntl.poly_offset_back_enable) {
+    polygon_offset_out.back_scale =
+        regs.Get<float>(XE_GPU_REG_PA_SU_POLY_OFFSET_BACK_SCALE);
+    polygon_offset_out.back_offset =
+        regs.Get<float>(XE_GPU_REG_PA_SU_POLY_OFFSET_BACK_OFFSET);
+  }
+
+  if (!polygon_offset_out.front_scale && !polygon_offset_out.front_offset &&
+      !polygon_offset_out.back_scale && !polygon_offset_out.back_offset) {
+    return false;
+  }
+
+  polygon_offset_out.front_scale *= xenos::kPolygonOffsetScaleSubpixelUnit;
+  polygon_offset_out.back_scale *= xenos::kPolygonOffsetScaleSubpixelUnit;
+  if (regs.Get<reg::RB_DEPTH_INFO>().depth_format ==
+      xenos::DepthRenderTargetFormat::kD24FS8) {
+    polygon_offset_out.front_offset *= 0.5f;
+    polygon_offset_out.back_offset *= 0.5f;
+  }
+  return true;
 }
 
 // https://docs.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_standard_multisample_quality_levels
@@ -910,15 +992,15 @@ void GetResolveEdramTileSpan(ResolveEdramInfo edram_info,
 
 constexpr ResolveCopyShaderInfo
     resolve_copy_shader_info[size_t(ResolveCopyShaderIndex::kCount)] = {
-        {"Resolve Copy Fast 32bpp 1x/2xMSAA", false, 4, 4, 6, 3},
-        {"Resolve Copy Fast 32bpp 4xMSAA", false, 4, 4, 6, 3},
-        {"Resolve Copy Fast 64bpp 1x/2xMSAA", false, 4, 4, 5, 3},
-        {"Resolve Copy Fast 64bpp 4xMSAA", false, 3, 4, 5, 3},
-        {"Resolve Copy Full 8bpp", true, 2, 3, 6, 3},
-        {"Resolve Copy Full 16bpp", true, 2, 3, 5, 3},
-        {"Resolve Copy Full 32bpp", true, 2, 4, 5, 3},
-        {"Resolve Copy Full 64bpp", true, 2, 4, 5, 3},
-        {"Resolve Copy Full 128bpp", true, 2, 4, 4, 3},
+        {"Resolve Copy Fast 32bpp 1x/2xMSAA", 6, 3},
+        {"Resolve Copy Fast 32bpp 4xMSAA", 6, 3},
+        {"Resolve Copy Fast 64bpp 1x/2xMSAA", 5, 3},
+        {"Resolve Copy Fast 64bpp 4xMSAA", 5, 3},
+        {"Resolve Copy Full 8bpp", 6, 3},
+        {"Resolve Copy Full 16bpp", 5, 3},
+        {"Resolve Copy Full 32bpp", 5, 3},
+        {"Resolve Copy Full 64bpp", 5, 3},
+        {"Resolve Copy Full 128bpp", 4, 3},
 };
 XE_MSVC_OPTIMIZE_SMALL()
 bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
@@ -964,10 +1046,13 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
           ? 0.5f
           : 0.0f;
   int32_t vertices_fixed[6];
+  float vertices_swapped[6];
   for (size_t i = 0; i < xe::countof(vertices_fixed); ++i) {
-    vertices_fixed[i] = ui::FloatToD3D11Fixed16p8(
-        xenos::GpuSwap(vertices_guest[i], fetch.endian) + half_pixel_offset);
+    vertices_swapped[i] = xenos::GpuSwap(vertices_guest[i], fetch.endian);
+    vertices_fixed[i] =
+        ui::FloatToD3D11Fixed16p8(vertices_swapped[i] + half_pixel_offset);
   }
+
   // Inclusive.
   int32_t x0 = std::min(std::min(vertices_fixed[0], vertices_fixed[2]),
                         vertices_fixed[4]);
@@ -1052,12 +1137,15 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
            xenos::kMaxResolveSize);
     y1 = y0 + int32_t(xenos::kMaxResolveSize);
   }
-  // fails in forza horizon 1
-  // x0 is 0, x1 is 0x100, y0 is 0x100, y1 is 0x100
-  assert_true(x0 <= x1 && y0 <= y1);
+  // If the region is empty or inverted after clipping (e.g., entirely outside
+  // EDRAM bounds due to window offset), treat as a no-op rather than an error.
+  // The caller checks width/height and skips the resolve.
+  // Reduces log spam in Forza Horizon 1/2 which seem to do a lot of these
+  // resolves without any visible impact on rendering.
   if (x0 >= x1 || y0 >= y1) {
-    XELOGE("Resolve region is empty");
-    return false;
+    info_out.coordinate_info.width_div_8 = 0;
+    info_out.height_div_8 = 0;
+    return true;
   }
 
   info_out.coordinate_info.width_div_8 =
@@ -1125,16 +1213,16 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
   uint32_t copy_dest_base_adjusted = rb_copy_dest_base;
   uint32_t copy_dest_extent_start, copy_dest_extent_end;
   auto rb_copy_dest_pitch = regs.Get<reg::RB_COPY_DEST_PITCH>();
-  uint32_t copy_dest_pitch_aligned_div_32 =
-      (rb_copy_dest_pitch.copy_dest_pitch +
-       (xenos::kTextureTileWidthHeight - 1)) >>
-      xenos::kTextureTileWidthHeightLog2;
+  const uint32_t copy_dest_pitch_aligned =
+      xe::align(rb_copy_dest_pitch.copy_dest_pitch,
+                texture_address::kStoragePitchHeightAlignmentBlocks);
   info_out.copy_dest_coordinate_info.pitch_aligned_div_32 =
-      copy_dest_pitch_aligned_div_32;
+      copy_dest_pitch_aligned >> 5;
+  const uint32_t copy_dest_height_aligned =
+      xe::align(rb_copy_dest_pitch.copy_dest_height,
+                texture_address::kStoragePitchHeightAlignmentBlocks);
   info_out.copy_dest_coordinate_info.height_aligned_div_32 =
-      (rb_copy_dest_pitch.copy_dest_height +
-       (xenos::kTextureTileWidthHeight - 1)) >>
-      xenos::kTextureTileWidthHeightLog2;
+      copy_dest_height_aligned >> 5;
   const FormatInfo& dest_format_info = *FormatInfo::Get(dest_format);
   if (is_depth || dest_format_info.type == FormatType::kResolvable) {
     uint32_t bpp_log2 = xe::log2_floor(dest_format_info.bits_per_pixel >> 3);
@@ -1157,34 +1245,31 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
     if (rb_copy_dest_info.copy_dest_array) {
       // The base pointer is already adjusted to the Z / 8 (copy_dest_slice is
       // 3-bit).
-      copy_dest_base_adjusted += texture_util::GetTiledOffset3D(
+      copy_dest_base_adjusted += uint32_t(texture_address::Tiled3D(
           int32_t(dest_base_x), int32_t(dest_base_y), 0,
-          rb_copy_dest_pitch.copy_dest_pitch,
-          rb_copy_dest_pitch.copy_dest_height, bpp_log2);
+          copy_dest_pitch_aligned, copy_dest_height_aligned, bpp_log2));
       copy_dest_extent_start =
           rb_copy_dest_base +
-          texture_util::GetTiledAddressLowerBound3D(
+          uint32_t(texture_util::GetTiledAddressLowerBound3D(
               uint32_t(x0), uint32_t(y0), rb_copy_dest_info.copy_dest_slice,
-              rb_copy_dest_pitch.copy_dest_pitch,
-              rb_copy_dest_pitch.copy_dest_height, bpp_log2);
+              copy_dest_pitch_aligned, copy_dest_height_aligned, bpp_log2));
       copy_dest_extent_end =
           rb_copy_dest_base +
-          texture_util::GetTiledAddressUpperBound3D(
+          uint32_t(texture_util::GetTiledAddressUpperBound3D(
               uint32_t(x1), uint32_t(y1), rb_copy_dest_info.copy_dest_slice + 1,
-              rb_copy_dest_pitch.copy_dest_pitch,
-              rb_copy_dest_pitch.copy_dest_height, bpp_log2);
+              copy_dest_pitch_aligned, copy_dest_height_aligned, bpp_log2));
     } else {
-      copy_dest_base_adjusted += texture_util::GetTiledOffset2D(
-          int32_t(dest_base_x), int32_t(dest_base_y),
-          rb_copy_dest_pitch.copy_dest_pitch, bpp_log2);
+      copy_dest_base_adjusted +=
+          texture_address::Tiled2D(int32_t(dest_base_x), int32_t(dest_base_y),
+                                   copy_dest_pitch_aligned, bpp_log2);
       copy_dest_extent_start =
-          rb_copy_dest_base + texture_util::GetTiledAddressLowerBound2D(
-                                  uint32_t(x0), uint32_t(y0),
-                                  rb_copy_dest_pitch.copy_dest_pitch, bpp_log2);
+          rb_copy_dest_base +
+          texture_util::GetTiledAddressLowerBound2D(
+              uint32_t(x0), uint32_t(y0), copy_dest_pitch_aligned, bpp_log2);
       copy_dest_extent_end =
-          rb_copy_dest_base + texture_util::GetTiledAddressUpperBound2D(
-                                  uint32_t(x1), uint32_t(y1),
-                                  rb_copy_dest_pitch.copy_dest_pitch, bpp_log2);
+          rb_copy_dest_base +
+          texture_util::GetTiledAddressUpperBound2D(
+              uint32_t(x1), uint32_t(y1), copy_dest_pitch_aligned, bpp_log2);
     }
   } else {
     XELOGE("Tried to resolve to format {}, which is not a ColorFormat",
@@ -1264,6 +1349,8 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
     color_edram_info.format = uint32_t(color_info.color_format);
     color_edram_info.format_is_64bpp = is_64bpp;
     color_edram_info.fill_half_pixel_offset = uint32_t(fill_half_pixel_offset);
+    color_edram_info.decode_pwl_gamma =
+        cvars::gamma_decode_pwl_resolve ? 1u : 0u;
     if ((fixed_rg16_truncated_to_minus_1_to_1 &&
          color_info.color_format == xenos::ColorRenderTargetFormat::k_16_16) ||
         (fixed_rgba16_truncated_to_minus_1_to_1 &&
@@ -1312,6 +1399,27 @@ bool GetResolveInfo(const RegisterFile& regs, const Memory& memory,
   return true;
 }
 XE_MSVC_OPTIMIZE_REVERT()
+
+// Raw resolve is only safe when the destination would read the same bits the
+// active EDRAM view already stores. Canonical fixed colors are unsigned
+// fractions and float colors are floats; signed/integer destinations need full
+// resolve so copy_dest_number can actually repack them.
+static constexpr bool ColorResolveNumberFormatMatches(
+    xenos::ColorFormat color_format, xenos::SurfaceNumberFormat num_format) {
+  switch (color_format) {
+    case xenos::ColorFormat::k_16_FLOAT:
+    case xenos::ColorFormat::k_16_16_FLOAT:
+    case xenos::ColorFormat::k_16_16_16_16_FLOAT:
+    case xenos::ColorFormat::k_32_FLOAT:
+    case xenos::ColorFormat::k_32_32_FLOAT:
+    case xenos::ColorFormat::k_32_32_32_32_FLOAT:
+      return num_format == xenos::SurfaceNumberFormat::kFloat;
+    default:
+      return num_format ==
+             xenos::SurfaceNumberFormat::kUnsignedRepeatingFraction;
+  }
+}
+
 ResolveCopyShaderIndex ResolveInfo::GetCopyShader(
     uint32_t draw_resolution_scale_x, uint32_t draw_resolution_scale_y,
     ResolveCopyShaderConstants& constants_out, uint32_t& group_count_x_out,
@@ -1320,12 +1428,25 @@ ResolveCopyShaderIndex ResolveInfo::GetCopyShader(
   bool is_depth = IsCopyingDepth();
   ResolveEdramInfo edram_info = is_depth ? depth_edram_info : color_edram_info;
   bool source_is_64bpp = !is_depth && color_edram_info.format_is_64bpp != 0;
-  if (is_depth || (!copy_dest_info.copy_dest_exp_bias &&
-                   xenos::IsSingleCopySampleSelected(
-                       copy_dest_coordinate_info.copy_sample_select) &&
-                   xenos::IsColorResolveFormatBitwiseEquivalent(
-                       xenos::ColorRenderTargetFormat(color_edram_info.format),
-                       xenos::ColorFormat(copy_dest_info.copy_dest_format)))) {
+  // Fast color resolve is a raw copy. If copy_dest_number asks for a different
+  // target that'd be decoded to linear by a real hardware resolve, it needs the
+  // full shader conversion. Any title keeping the encoding will re-alias as
+  // 8_8_8_8 before resolving, so any gamma source is always being decoded.
+  bool gamma_decoded_source =
+      !is_depth && color_edram_info.decode_pwl_gamma &&
+      xenos::ColorRenderTargetFormat(color_edram_info.format) ==
+          xenos::ColorRenderTargetFormat::k_8_8_8_8_GAMMA;
+  if (is_depth ||
+      (!gamma_decoded_source && !copy_dest_info.copy_dest_exp_bias &&
+       xenos::IsSingleCopySampleSelected(
+           copy_dest_coordinate_info.copy_sample_select) &&
+       xenos::IsColorResolveFormatBitwiseEquivalent(
+           xenos::ColorRenderTargetFormat(color_edram_info.format),
+           xenos::ColorFormat(copy_dest_info.copy_dest_format)) &&
+       (!cvars::resolve_check_number_format ||
+        ColorResolveNumberFormatMatches(
+            xenos::ColorFormat(copy_dest_info.copy_dest_format),
+            copy_dest_info.copy_dest_number)))) {
     if (edram_info.msaa_samples >= xenos::MsaaSamples::k4X) {
       shader = source_is_64bpp ? ResolveCopyShaderIndex::kFast64bpp4xMSAA
                                : ResolveCopyShaderIndex::kFast32bpp4xMSAA;
@@ -1383,6 +1504,16 @@ ResolveCopyShaderIndex ResolveInfo::GetCopyShader(
   }
 
   return shader;
+}
+
+uint32_t GetResolveDownscalePixelSizeLog2(
+    reg::RB_COPY_DEST_INFO copy_dest_info) {
+  // copy_dest_format holds a xenos::TextureFormat normalized by
+  // GetResolveInfo, and this is the same size derivation that was used for
+  // the destination extent calculation there.
+  const FormatInfo& dest_format_info = *FormatInfo::Get(
+      xenos::TextureFormat(uint32_t(copy_dest_info.copy_dest_format)));
+  return xe::log2_floor(dest_format_info.bits_per_pixel >> 3);
 }
 
 }  // namespace draw_util

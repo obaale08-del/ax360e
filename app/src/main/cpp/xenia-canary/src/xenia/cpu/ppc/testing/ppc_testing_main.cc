@@ -108,8 +108,10 @@ class TestSuite {
     name = name.replace_extension();
 
     name_ = xe::path_to_utf8(name);
-    map_file_path_ = cvars::test_bin_path / name.replace_extension(".map");
-    bin_file_path_ = cvars::test_bin_path / name.replace_extension(".bin");
+    map_file_path_ = std::filesystem::path(XE_SOURCE_ROOT) /
+                     cvars::test_bin_path / name.replace_extension(".map");
+    bin_file_path_ = std::filesystem::path(XE_SOURCE_ROOT) /
+                     cvars::test_bin_path / name.replace_extension(".bin");
   }
 
   bool Load() {
@@ -376,7 +378,9 @@ class TestRunner {
         auto p = memory_->TranslateVirtual(address);
         const char* c = bytes_str.c_str();
         while (*c) {
-          while (*c == ' ') ++c;
+          while (*c == ' ') {
+            ++c;
+          }
           if (!*c) {
             break;
           }
@@ -425,7 +429,9 @@ class TestRunner {
         StringBuffer expecteds;
         StringBuffer actuals;
         while (*c) {
-          while (*c == ' ') ++c;
+          while (*c == ' ') {
+            ++c;
+          }
           if (!*c) {
             break;
           }
@@ -466,7 +472,8 @@ class TestRunner {
 
 bool DiscoverTests(const std::filesystem::path& test_path,
                    std::vector<std::filesystem::path>& test_files) {
-  auto file_infos = xe::filesystem::ListFiles(test_path);
+  auto file_infos = xe::filesystem::ListFiles(
+      std::filesystem::path(XE_SOURCE_ROOT) / test_path);
   for (auto& file_info : file_infos) {
     if (file_info.name.extension() == ".s") {
       // Only include test files (instr_*.s), not helper files
@@ -665,7 +672,7 @@ bool RunTests(const std::vector<std::string>& test_names) {
   std::vector<TestSuite> test_suites;
   bool load_failed = false;
   for (auto& test_path : test_files) {
-    TestSuite test_suite(test_path);
+    TestSuite test_suite(std::filesystem::path(XE_SOURCE_ROOT) / test_path);
     if (!test_name_filter.empty() &&
         test_name_filter.find(test_suite.name()) == test_name_filter.end()) {
       continue;
@@ -728,7 +735,9 @@ bool RunTests(const std::vector<std::string>& test_names) {
         suite_tests.push_back(&test_case);
       }
     }
-    if (suite_tests.empty()) continue;
+    if (suite_tests.empty()) {
+      continue;
+    }
     ++suite_index;
 
     int pct =
@@ -753,7 +762,9 @@ bool RunTests(const std::vector<std::string>& test_names) {
   // instance per thread (avoids shm name collisions between concurrent
   // children).
   unsigned int num_cores = std::thread::hardware_concurrency();
-  if (num_cores == 0) num_cores = 4;
+  if (num_cores == 0) {
+    num_cores = 4;
+  }
   num_cores = std::max(1u, num_cores * 3 / 4);
 
   fprintf(stderr, "Running tests in parallel using %u workers\n", num_cores);
@@ -795,7 +806,9 @@ bool RunTests(const std::vector<std::string>& test_names) {
 
     while (true) {
       size_t idx = test_index.fetch_add(1);
-      if (idx >= all_tests.size()) break;
+      if (idx >= all_tests.size()) {
+        break;
+      }
 
       auto& [test_suite, test_case] = all_tests[idx];
       int local_failed = 0;

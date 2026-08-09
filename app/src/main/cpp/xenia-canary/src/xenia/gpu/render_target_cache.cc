@@ -144,16 +144,25 @@ DEFINE_bool(
     "into account for render-to-texture, for more correct shadow filtering, "
     "bloom, etc., in some cases.",
     "GPU");
-// Disabled by default because of full-screen effects that occur when game
-// shaders assume piecewise linear (4541080F), much more severe than
-// blending-related issues.
+DEFINE_uint32(
+    draw_resolution_scale_threshold, 0,
+    "Surface pitch in pixels at or below render targets skip being upscaled "
+    "by draw_resolution_scale_x/y. 0 disables it.\n"
+    "Small offscreen surfaces like bloom or depth of field buffers often "
+    "break when upscaled and keeping them native avoids that. The pitch "
+    "is compared after alignment to 80 pixel EDRAM tiles, so prefer "
+    "conservative values, only as high as the broken effects need.\n"
+    "Host render targets only.",
+    "GPU");
 DEFINE_bool(
-    gamma_render_target_as_srgb, false,
-    "When the host can't write piecewise linear gamma directly with correct "
-    "blending, use sRGB output on the host for conceptually correct blending "
-    "in linear color space while having slightly different precision "
-    "distribution in the render target and severely incorrect values if the "
-    "game accesses the resulting colors directly as raw data.",
+    gamma_render_target_as_unorm16, true,
+    "When the host can't write 8 bits per component pixels with piecewise "
+    "linear gamma encoding directly with correct blending, use the 16-bit "
+    "unsigned normalized format, if supported, for conceptually correct "
+    "8_8_8_8_GAMMA render target format blending in linear color space. "
+    "Greatly increases accuracy for this format, but may result in render "
+    "target copying costs if the game switches between 8_8_8_8_GAMMA and "
+    "8_8_8_8 views for the same EDRAM render target.",
     "GPU");
 DEFINE_bool(
     mrt_edram_used_range_clamp_to_min, true,
@@ -505,6 +514,18 @@ void RenderTargetCache::InitializeCommon() {
       std::piecewise_construct, std::forward_as_tuple(uint32_t(0)),
       std::forward_as_tuple(xenos::kEdramTileCount, RenderTargetKey(),
                             RenderTargetKey(), RenderTargetKey()));
+
+  if (cvars::draw_resolution_scale_threshold) {
+    if (GetPath() != Path::kHostRenderTargets) {
+      XELOGW(
+          "draw_resolution_scale_threshold is only supported by the host "
+          "render target path - ignoring");
+    } else if (!IsDrawResolutionScaled()) {
+      XELOGW(
+          "draw_resolution_scale_threshold has no effect without "
+          "draw_resolution_scale_x/y above 1 - ignoring");
+    }
+  }
 }
 
 void RenderTargetCache::DestroyAllRenderTargets(bool shutting_down) {
@@ -566,6 +587,37 @@ void RenderTargetCache::ClearCache() {
 
 void RenderTargetCache::BeginFrame() { ResetAccumulatedRenderTargets(); }
 
+bool RenderTargetCache::IsScaleNativeForPitch(
+    uint32_t pitch_tiles_at_32bpp, xenos::MsaaSamples msaa_samples) const {
+  uint32_t threshold = cvars::draw_resolution_scale_threshold;
+  if (!threshold || !IsDrawResolutionScaled() ||
+      GetPath() != Path::kHostRenderTargets) {
+    return false;
+  }
+  // Pitch is the only guest surface dimension that's reliably known since host
+  // render target heights are overestimated to cover all EDRAM, and draw height
+  // estimates would flip the same surface between classes and churn transfers.
+  // Pitch and MSAA are also shared by every surface of a draw so depth and
+  // color always land in the same class.
+  uint32_t pitch_pixels_tile_aligned =
+      RenderTargetKey::GetWidth(pitch_tiles_at_32bpp, msaa_samples);
+  return pitch_pixels_tile_aligned != 0 &&
+         pitch_pixels_tile_aligned <= threshold;
+}
+
+bool RenderTargetCache::IsDrawScaleNative() const {
+  auto rb_surface_info = register_file().Get<reg::RB_SURFACE_INFO>();
+  // Same pitch normalization as in Update.
+  uint32_t msaa_samples_x_log2 =
+      uint32_t(rb_surface_info.msaa_samples >= xenos::MsaaSamples::k4X);
+  uint32_t pitch_tiles_at_32bpp =
+      ((rb_surface_info.surface_pitch << msaa_samples_x_log2) +
+       (xenos::kEdramTileWidthSamples - 1)) /
+      xenos::kEdramTileWidthSamples;
+  return IsScaleNativeForPitch(pitch_tiles_at_32bpp,
+                               rb_surface_info.msaa_samples);
+}
+
 bool RenderTargetCache::Update(bool is_rasterization_done,
                                reg::RB_DEPTHCONTROL normalized_depth_control,
                                uint32_t normalized_color_mask,
@@ -601,11 +653,13 @@ bool RenderTargetCache::Update(bool is_rasterization_done,
   uint32_t pitch_tiles_at_32bpp = ((pitch_pixels << msaa_samples_x_log2) +
                                    (xenos::kEdramTileWidthSamples - 1)) /
                                   xenos::kEdramTileWidthSamples;
+  // Scale class of all the surfaces of this draw.
+  bool scale_native = IsScaleNativeForPitch(pitch_tiles_at_32bpp, msaa_samples);
   if (!interlock_barrier_only) {
     uint32_t pitch_pixels_tile_aligned_scaled =
         pitch_tiles_at_32bpp *
         (xenos::kEdramTileWidthSamples >> msaa_samples_x_log2) *
-        draw_resolution_scale_x();
+        (scale_native ? 1 : draw_resolution_scale_x());
     uint32_t max_render_target_width = GetMaxRenderTargetWidth();
     if (pitch_pixels_tile_aligned_scaled > max_render_target_width) {
       // TODO(Triang3l): If really needed for some game on some device, clamp
@@ -630,7 +684,6 @@ bool RenderTargetCache::Update(bool is_rasterization_done,
   uint32_t edram_bases[1 + xenos::kMaxColorRenderTargets];
   uint32_t resource_formats[1 + xenos::kMaxColorRenderTargets];
   uint32_t rts_are_64bpp = 0;
-  uint32_t color_rts_are_gamma = 0;
   if (is_rasterization_done) {
     if (normalized_depth_control.z_enable ||
         normalized_depth_control.stencil_enable) {
@@ -658,9 +711,6 @@ bool RenderTargetCache::Update(bool is_rasterization_done,
       bool is_64bpp = xenos::IsColorRenderTargetFormat64bpp(color_format);
       if (is_64bpp) {
         rts_are_64bpp |= uint32_t(1) << rt_bit_index;
-      }
-      if (color_format == xenos::ColorRenderTargetFormat::k_8_8_8_8_GAMMA) {
-        color_rts_are_gamma |= uint32_t(1) << i;
       }
       xenos::ColorRenderTargetFormat color_resource_format;
       if (interlock_barrier_only) {
@@ -747,7 +797,6 @@ bool RenderTargetCache::Update(bool is_rasterization_done,
     if (!are_accumulated_render_targets_valid_) {
       std::memset(last_update_accumulated_render_targets_, 0,
                   sizeof(last_update_accumulated_render_targets_));
-      last_update_accumulated_color_targets_are_gamma_ = 0;
     }
     return true;
   }
@@ -831,6 +880,7 @@ bool RenderTargetCache::Update(bool is_rasterization_done,
     rt_key.msaa_samples = msaa_samples;
     rt_key.is_depth = rt_bit_index == 0;
     rt_key.resource_format = resource_formats[rt_bit_index];
+    rt_key.scale_native = uint32_t(scale_native);
     if (!interlock_barrier_only) {
       RenderTarget* render_target = GetOrCreateRenderTarget(rt_key);
       if (!render_target) {
@@ -958,26 +1008,13 @@ bool RenderTargetCache::Update(bool is_rasterization_done,
     std::memcpy(last_update_accumulated_render_targets_,
                 last_update_used_render_targets_,
                 sizeof(last_update_accumulated_render_targets_));
-    last_update_accumulated_color_targets_are_gamma_ = 0;
     are_accumulated_render_targets_valid_ = true;
   }
-  // Only update color space of render targets that actually matter here, don't
-  // disable gamma emulation (which may require ending the render pass) on the
-  // host, for example, if making a depth-only draw between color draws with a
-  // gamma target.
-  uint32_t color_rts_used_bits = depth_and_color_rts_used_bits >> 1;
-  // Ignore any render targets dropped before in this function for any reason.
-  color_rts_are_gamma &= color_rts_used_bits;
-  last_update_accumulated_color_targets_are_gamma_ =
-      (last_update_accumulated_color_targets_are_gamma_ &
-       ~color_rts_used_bits) |
-      color_rts_are_gamma;
 
   return true;
 }
 
 uint32_t RenderTargetCache::GetLastUpdateBoundRenderTargets(
-    bool distinguish_gamma_formats,
     uint32_t* depth_and_color_formats_out) const {
   if (GetPath() != Path::kHostRenderTargets) {
     if (depth_and_color_formats_out) {
@@ -998,12 +1035,7 @@ uint32_t RenderTargetCache::GetLastUpdateBoundRenderTargets(
     }
     rts_used |= uint32_t(1) << i;
     if (depth_and_color_formats_out) {
-      depth_and_color_formats_out[i] =
-          (distinguish_gamma_formats && i &&
-           (last_update_accumulated_color_targets_are_gamma_ &
-            (uint32_t(1) << (i - 1))))
-              ? uint32_t(xenos::ColorRenderTargetFormat::k_8_8_8_8_GAMMA)
-              : render_target->key().resource_format;
+      depth_and_color_formats_out[i] = render_target->key().resource_format;
     }
   }
   return rts_used;
@@ -1152,6 +1184,27 @@ void RenderTargetCache::GetResolveCopyRectanglesToDump(
   }
 }
 
+bool RenderTargetCache::IsResolveSourceNativeOnly(uint32_t base,
+                                                  uint32_t row_length,
+                                                  uint32_t rows,
+                                                  uint32_t pitch) const {
+  if (!IsDrawResolutionScaled() || GetPath() != Path::kHostRenderTargets) {
+    return false;
+  }
+  std::vector<ResolveCopyDumpRectangle> rectangles;
+  GetResolveCopyRectanglesToDump(base, row_length, rows, pitch, rectangles);
+  if (rectangles.empty()) {
+    return false;
+  }
+  for (const ResolveCopyDumpRectangle& rectangle : rectangles) {
+    assert_not_null(rectangle.render_target);
+    if (!rectangle.render_target->key().scale_native) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool RenderTargetCache::PrepareHostRenderTargetsResolveClear(
     const draw_util::ResolveInfo& resolve_info,
     Transfer::Rectangle& clear_rectangle_out,
@@ -1205,7 +1258,9 @@ bool RenderTargetCache::PrepareHostRenderTargetsResolveClear(
   uint32_t pitch_pixels =
       pitch_tiles_at_32bpp *
       (xenos::kEdramTileWidthSamples >> msaa_samples_x_log2);
-  uint32_t pitch_pixels_scaled = pitch_pixels * draw_resolution_scale_x();
+  bool scale_native = IsScaleNativeForPitch(pitch_tiles_at_32bpp, msaa_samples);
+  uint32_t pitch_pixels_scaled =
+      pitch_pixels * (scale_native ? 1 : draw_resolution_scale_x());
   uint32_t max_render_target_width = GetMaxRenderTargetWidth();
   if (pitch_pixels_scaled > max_render_target_width) {
     // TODO(Triang3l): If really needed for some game on some device, clamp the
@@ -1321,6 +1376,7 @@ bool RenderTargetCache::PrepareHostRenderTargetsResolveClear(
     depth_render_target_key.is_depth = 1;
     depth_render_target_key.resource_format =
         resolve_info.depth_edram_info.format;
+    depth_render_target_key.scale_native = uint32_t(scale_native);
     depth_render_target = GetOrCreateRenderTarget(depth_render_target_key);
     if (!depth_render_target) {
       // Failed to create the depth render target, don't clear it.
@@ -1337,6 +1393,7 @@ bool RenderTargetCache::PrepareHostRenderTargetsResolveClear(
     color_render_target_key.is_depth = 0;
     color_render_target_key.resource_format = uint32_t(GetColorResourceFormat(
         xenos::ColorRenderTargetFormat(resolve_info.color_edram_info.format)));
+    color_render_target_key.scale_native = uint32_t(scale_native);
     color_render_target = GetOrCreateRenderTarget(color_render_target_key);
     if (!color_render_target) {
       // Failed to create the color render target, don't clear it.
@@ -1545,8 +1602,15 @@ void RenderTargetCache::ChangeOwnership(
   }
   uint32_t dest_pitch_tiles = dest.GetPitchTiles();
   bool dest_is_64bpp = dest.Is64bpp();
+  // Native scale render targets are kept out of host depth tracking entirely
+  // so the host depth buffer region only ever holds data at the global scale
+  // and transfers never read host depth across scale classes. Ranges keep
+  // their old scaled host owners, which is fine. Host depth is only used where
+  // it still round trips to guest depth. Sub threshold depth just loses
+  // float32 precision on round trips anyways.
   bool host_depth_encoding_different =
-      dest.is_depth && GetPath() == Path::kHostRenderTargets &&
+      dest.is_depth && !dest.scale_native &&
+      GetPath() == Path::kHostRenderTargets &&
       IsHostDepthEncodingDifferent(dest.GetDepthFormat());
   auto change_ownership_in_extent = [&](uint32_t extent_start,
                                         uint32_t extent_end) {

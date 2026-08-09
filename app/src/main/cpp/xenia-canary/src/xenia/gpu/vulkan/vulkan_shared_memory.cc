@@ -19,6 +19,8 @@
 #include "xenia/gpu/vulkan/vulkan_command_processor.h"
 #include "xenia/ui/vulkan/vulkan_util.h"
 
+DECLARE_bool(gpu_allow_invalid_upload_range);
+
 DEFINE_bool(vulkan_sparse_shared_memory, true,
             "Enable sparse binding for shared memory emulation. Disabling it "
             "increases video memory usage - a 512 MB buffer is created - but "
@@ -42,7 +44,9 @@ VulkanSharedMemory::VulkanSharedMemory(
 VulkanSharedMemory::~VulkanSharedMemory() { Shutdown(true); }
 
 bool VulkanSharedMemory::Initialize() {
-  InitializeCommon();
+  if (!InitializeCommon()) {
+    return false;
+  }
 
   const ui::vulkan::VulkanDevice* const vulkan_device =
       command_processor_.GetVulkanDevice();
@@ -207,6 +211,12 @@ void VulkanSharedMemory::Shutdown(bool from_destructor) {
   if (!from_destructor) {
     ShutdownCommon();
   }
+}
+
+void VulkanSharedMemory::ClearCache() {
+  SharedMemory::ClearCache();
+
+  upload_buffer_pool_->ClearCache();
 }
 
 void VulkanSharedMemory::CompletedSubmissionUpdated() {
@@ -399,6 +409,30 @@ bool VulkanSharedMemory::UploadRanges(
     uint32_t upload_range_length = upload_page_ranges[i].second;
     trace_writer_.WriteMemoryRead(upload_range_start << page_size_log2(),
                                   upload_range_length << page_size_log2());
+
+    if (upload_range_length > 0 && !cvars::gpu_allow_invalid_upload_range) {
+      const uint32_t range_start_addr = upload_range_start << page_size_log2();
+      const uint32_t upload_range_last_page =
+          upload_range_start + upload_range_length - 1;
+      const uint32_t range_end_addr = upload_range_last_page
+                                      << page_size_log2();
+
+      const memory::PageAccess start_access =
+          memory().GetPhysicalHeap()->QueryRangeAccess(range_start_addr,
+                                                       range_start_addr);
+      const memory::PageAccess end_access =
+          memory().GetPhysicalHeap()->QueryRangeAccess(range_end_addr,
+                                                       range_end_addr);
+      if (start_access == xe::memory::PageAccess::kNoAccess ||
+          end_access == xe::memory::PageAccess::kNoAccess) {
+        XELOGE(
+            "Vulkan shared memory: Invalid upload range {:08X} length {:08X}",
+            upload_range_start, upload_range_length);
+        successful = false;
+        break;
+      }
+    }
+
     while (upload_range_length) {
       VkBuffer upload_buffer;
       VkDeviceSize upload_buffer_offset, upload_buffer_size;
@@ -412,11 +446,20 @@ bool VulkanSharedMemory::UploadRanges(
         break;
       }
       MakeRangeValid(upload_range_start << page_size_log2(),
-                     uint32_t(upload_buffer_size), false, false);
-      std::memcpy(
-          upload_buffer_mapping,
-          memory().TranslatePhysical(upload_range_start << page_size_log2()),
-          upload_buffer_size);
+                     uint32_t(upload_buffer_size), false);
+
+      if (upload_buffer_size < (1ULL << 32) && upload_buffer_size > 8192) {
+        memory::vastcpy(
+            upload_buffer_mapping,
+            memory().TranslatePhysical(upload_range_start << page_size_log2()),
+            static_cast<uint32_t>(upload_buffer_size));
+        swcache::WriteFence();
+      } else {
+        std::memcpy(
+            upload_buffer_mapping,
+            memory().TranslatePhysical(upload_range_start << page_size_log2()),
+            upload_buffer_size);
+      }
       if (upload_buffer_previous != upload_buffer && !upload_regions_.empty()) {
         assert_true(upload_buffer_previous != VK_NULL_HANDLE);
         command_buffer.CmdVkCopyBuffer(upload_buffer_previous, buffer_,
@@ -455,7 +498,7 @@ void VulkanSharedMemory::GetUsageMasks(Usage usage,
   switch (usage) {
     case Usage::kComputeWrite:
       stage_mask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-      access_mask = VK_ACCESS_SHADER_READ_BIT;
+      access_mask = VK_ACCESS_SHADER_WRITE_BIT;
       return;
     case Usage::kTransferDestination:
       stage_mask = VK_PIPELINE_STAGE_TRANSFER_BIT;

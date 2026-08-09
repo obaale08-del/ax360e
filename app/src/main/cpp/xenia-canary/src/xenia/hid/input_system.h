@@ -74,7 +74,8 @@ class InputSystem {
   std::vector<InputDriver*> FilterDrivers(uint32_t flags);
 
   xe::ui::Window* window_ = nullptr;
-public:
+
+ public:
   std::vector<std::unique_ptr<InputDriver>> drivers_;
 
   std::unique_ptr<Portal> portal_;

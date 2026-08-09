@@ -29,6 +29,8 @@
 namespace xe {
 namespace app {
 
+class ConsoleSettingsDialog;
+
 struct RecentTitleEntry {
   std::string title_name;
   std::filesystem::path path_to_file;
@@ -94,6 +96,8 @@ class EmulatorWindow {
 
   void ToggleProfilesConfigDialog();
   void ToggleXMPConfigDialog();
+  void ToggleConsoleSettingsDialog();
+
   void SetHotkeysState(bool enabled) { disable_hotkeys_ = !enabled; }
 
   // Types of button functions for hotkeys.
@@ -150,7 +154,7 @@ class EmulatorWindow {
     void OnMouseDown(ui::MouseEvent& e) override;
     void OnMouseUp(ui::MouseEvent& e) override;
 
-    void OnUsbDeviceChanged(bool is_arrival); //override;
+    void OnUsbDeviceChanged(bool is_arrival) override;
 
    private:
     EmulatorWindow& emulator_window_;
@@ -313,6 +317,7 @@ class EmulatorWindow {
   bool initializing_shader_storage_ = false;
 
   std::unique_ptr<DisplayConfigDialog> display_config_dialog_;
+  std::unique_ptr<ConsoleSettingsDialog> console_settings_dialog_;
 
   // Storing pointers and toggling dialog state is useful for broadcasting
   // messages back to guest.

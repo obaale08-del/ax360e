@@ -11,7 +11,6 @@
 
 #include "xenia/kernel/xam/profile_manager.h"
 
-#include "xenia/base/platform.h"
 #include "xenia/base/logging.h"
 #include "xenia/emulator.h"
 #include "xenia/hid/input_system.h"

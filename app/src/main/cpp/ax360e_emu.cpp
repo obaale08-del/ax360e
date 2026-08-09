@@ -188,7 +188,7 @@ bool AndroidWindow::OpenImpl() {
         if (w > 0 && h > 0) {
             OnDesiredLogicalSizeUpdate(SizeToLogical(w), SizeToLogical(h));
             WindowDestructionReceiver destruction_receiver(this);
-            OnActualSizeUpdate(uint32_t(w), uint32_t(h), destruction_receiver);
+            OnActualSizeUpdate(uint32_t(w), uint32_t(h), WindowResizeAction::kManual, destruction_receiver);
         } else {
             XELOGW("Android window has invalid size: {}x{}", w, h);
         }
@@ -222,7 +222,7 @@ void AndroidWindow::UpdateSurface(){
         if (w > 0 && h > 0) {
             OnDesiredLogicalSizeUpdate(SizeToLogical(w), SizeToLogical(h));
             WindowDestructionReceiver destruction_receiver(this);
-            OnActualSizeUpdate(uint32_t(w), uint32_t(h), destruction_receiver);
+            OnActualSizeUpdate(uint32_t(w), uint32_t(h), WindowResizeAction::kManual, destruction_receiver);
             if (destruction_receiver.IsWindowDestroyedOrClosed()) {
                 return;
             }
@@ -316,7 +316,7 @@ bool EmulatorApp::OnInitialize() {
             std::make_unique<xe::Emulator>("", storage_root, content_root, cache_root);
 
     // Determine window size based on user setting.
-    auto res = xe::gpu::GraphicsSystem::GetInternalDisplayResolution();
+    // auto res = xe::gpu::GraphicsSystem::GetInternalDisplayResolution();
 
     // Main emulator display window.
     emu_window = xe::app::EmulatorWindow::Create(emu.get(), app_context(),
@@ -590,7 +590,7 @@ void EmulatorApp::emu_thr_main() {
     if (xam) {
         xam->LoadLoaderData();
 
-        if (xam->loader_data().launch_data_present) {
+        if (!xam->loader_data().host_path.empty()) {
             const std::filesystem::path host_path = xam->loader_data().host_path;
             app_context().CallInUIThread([this, host_path]() {
                 return emu_window->RunTitle(host_path);

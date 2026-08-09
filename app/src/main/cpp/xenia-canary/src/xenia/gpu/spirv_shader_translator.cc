@@ -15,8 +15,10 @@
 #include "third_party/fmt/include/fmt/format.h"
 #include "third_party/glslang/SPIRV/GLSL.std.450.h"
 #include "xenia/base/assert.h"
+#include "xenia/base/logging.h"
 #include "xenia/base/math.h"
 #include "xenia/base/string_buffer.h"
+#include "xenia/gpu/spirv_compatibility.h"
 #include "xenia/gpu/spirv_shader.h"
 
 namespace xe {
@@ -90,14 +92,18 @@ uint64_t SpirvShaderTranslator::GetDefaultPixelShaderModification(
   return shader_modification.value;
 }
 
-std::vector<uint8_t> SpirvShaderTranslator::CreateDepthOnlyFragmentShader() {
+std::vector<uint8_t> SpirvShaderTranslator::CreateDepthOnlyFragmentShader(
+    Modification::DepthStencilMode depth_stencil_mode) {
   is_depth_only_fragment_shader_ = true;
   // TODO(Triang3l): Handle in a nicer way (is_depth_only_fragment_shader_ is a
   // leftover from when a Shader object wasn't used during translation).
   Shader shader(xenos::ShaderType::kPixel, 0, nullptr, 0);
   StringBuffer instruction_disassembly_buffer;
   shader.AnalyzeUcode(instruction_disassembly_buffer);
-  Shader::Translation& translation = *shader.GetOrCreateTranslation(0);
+  Modification modification(0);
+  modification.pixel.depth_stencil_mode = depth_stencil_mode;
+  Shader::Translation& translation =
+      *shader.GetOrCreateTranslation(modification.value);
   TranslateAnalyzedShader(translation);
   is_depth_only_fragment_shader_ = false;
   return translation.translated_binary();
@@ -110,6 +116,12 @@ void SpirvShaderTranslator::Reset() {
 
   uniform_float_constants_ = spv::NoResult;
 
+  // Vertex shader inputs.
+  input_vertex_index_ = spv::NoResult;
+  // Tessellation evaluation shader inputs.
+  input_primitive_id_ = spv::NoResult;
+  input_tess_coord_ = spv::NoResult;
+  // Pixel shader inputs.
   input_point_coordinates_ = spv::NoResult;
   input_fragment_coordinates_ = spv::NoResult;
   input_front_facing_ = spv::NoResult;
@@ -135,6 +147,12 @@ void SpirvShaderTranslator::Reset() {
   var_main_point_size_edge_flag_kill_vertex_ = spv::NoResult;
   var_main_kill_pixel_ = spv::NoResult;
   var_main_fsi_color_written_ = spv::NoResult;
+  std::fill(output_fragment_data_.begin(), output_fragment_data_.end(),
+            spv::NoResult);
+  output_or_var_fragment_depth_ = spv::NoResult;
+  output_fragment_depth_ = spv::NoResult;
+  main_fbo_depth_unbiased_ = spv::NoResult;
+  main_fbo_depth_derivatives_.fill(spv::NoResult);
 
   main_switch_op_.reset();
   main_switch_next_pc_phi_operands_.clear();
@@ -240,6 +258,14 @@ void SpirvShaderTranslator::StartTranslation() {
       type_uint4_, builder_->makeUintConstant(4), sizeof(uint32_t) * 4);
   builder_->addDecoration(type_uint4_array_4, spv::DecorationArrayStride,
                           sizeof(uint32_t) * 4);
+  spv::Id type_uint4_array_8 = builder_->makeArrayType(
+      type_uint4_, builder_->makeUintConstant(8), sizeof(uint32_t) * 4);
+  builder_->addDecoration(type_uint4_array_8, spv::DecorationArrayStride,
+                          sizeof(uint32_t) * 4);
+  spv::Id type_float4_array_6 = builder_->makeArrayType(
+      type_float4_, builder_->makeUintConstant(6), sizeof(float) * 4);
+  builder_->addDecoration(type_float4_array_6, spv::DecorationArrayStride,
+                          sizeof(float) * 4);
   const SystemConstant system_constants[] = {
       {"flags", offsetof(SystemConstants, flags), type_uint_},
       {"vertex_index_load_address",
@@ -263,6 +289,8 @@ void SpirvShaderTranslator::StartTranslation() {
        offsetof(SystemConstants, texture_swizzled_signs), type_uint4_array_2},
       {"texture_swizzles", offsetof(SystemConstants, texture_swizzles),
        type_uint4_array_4},
+      {"textures_resolved", offsetof(SystemConstants, textures_resolved),
+       type_uint_},
       {"alpha_test_reference", offsetof(SystemConstants, alpha_test_reference),
        type_float_},
       {"edram_32bpp_tile_pitch_dwords_scaled",
@@ -270,6 +298,9 @@ void SpirvShaderTranslator::StartTranslation() {
        type_uint_},
       {"edram_depth_base_dwords_scaled",
        offsetof(SystemConstants, edram_depth_base_dwords_scaled), type_uint_},
+      {"alpha_to_mask", offsetof(SystemConstants, alpha_to_mask), type_uint_},
+      {"zpd_fsi_counter_index",
+       offsetof(SystemConstants, zpd_fsi_counter_index), type_uint_},
       {"color_exp_bias", offsetof(SystemConstants, color_exp_bias),
        type_float4_},
       {"edram_poly_offset_front_scale",
@@ -296,6 +327,9 @@ void SpirvShaderTranslator::StartTranslation() {
        type_float4_array_4},
       {"edram_blend_constant", offsetof(SystemConstants, edram_blend_constant),
        type_float4_},
+      {"texture_integer_scale_bits",
+       offsetof(SystemConstants, texture_integer_scale_bits),
+       type_uint4_array_8},
   };
   id_vector_temp_.clear();
   id_vector_temp_.reserve(xe::countof(system_constants));
@@ -706,6 +740,21 @@ std::vector<uint8_t> SpirvShaderTranslator::CompleteTranslation() {
       builder_->addExecutionMode(function_main_,
                                  spv::ExecutionModeEarlyFragmentTests);
     }
+    // FSI handles depth manually.
+    if (!edram_fragment_shader_interlock_ &&
+        (current_shader().writes_depth() || DSV_IsWritingFloat24Depth() ||
+         DSV_IsApplyingPolygonOffset())) {
+      builder_->addExecutionMode(function_main_,
+                                 spv::ExecutionModeDepthReplacing);
+      // Truncating float24 conversion of the rasterizer's own depth rounds
+      // towards zero, so the output is always <= the original - announce that
+      // to keep coarse early-Z culling possible.
+      if (!current_shader().writes_depth() && !DSV_IsApplyingPolygonOffset() &&
+          GetSpirvShaderModification().pixel.depth_stencil_mode ==
+              Modification::DepthStencilMode::kFloat24Truncating) {
+        builder_->addExecutionMode(function_main_, spv::ExecutionModeDepthLess);
+      }
+    }
     if (edram_fragment_shader_interlock_) {
       // Accessing per-sample values, so interlocking just when there's common
       // coverage is enough if the device exposes that.
@@ -722,9 +771,45 @@ std::vector<uint8_t> SpirvShaderTranslator::CompleteTranslation() {
     }
   } else {
     assert_true(is_vertex_shader());
-    execution_model = IsSpirvTessEvalShader()
-                          ? spv::ExecutionModelTessellationEvaluation
-                          : spv::ExecutionModelVertex;
+    if (IsSpirvTessEvalShader()) {
+      execution_model = spv::ExecutionModelTessellationEvaluation;
+      // Set tessellation execution modes based on the domain shader type.
+      Modification shader_modification = GetSpirvShaderModification();
+      Shader::HostVertexShaderType host_type =
+          shader_modification.vertex.host_vertex_shader_type;
+      // Tessellation domain (triangles vs quads).
+      switch (host_type) {
+        case Shader::HostVertexShaderType::kTriangleDomainCPIndexed:
+        case Shader::HostVertexShaderType::kTriangleDomainPatchIndexed:
+          builder_->addExecutionMode(function_main_,
+                                     spv::ExecutionModeTriangles);
+          break;
+        case Shader::HostVertexShaderType::kQuadDomainCPIndexed:
+        case Shader::HostVertexShaderType::kQuadDomainPatchIndexed:
+          builder_->addExecutionMode(function_main_, spv::ExecutionModeQuads);
+          break;
+        case Shader::HostVertexShaderType::kLineDomainCPIndexed:
+        case Shader::HostVertexShaderType::kLineDomainPatchIndexed:
+          builder_->addExecutionMode(function_main_,
+                                     spv::ExecutionModeIsolines);
+          break;
+        default:
+          assert_unhandled_case(host_type);
+          break;
+      }
+      // Tessellation spacing - fractional_even for continuous mode, equal
+      // (integer) for discrete mode. The actual mode is determined by the TCS
+      // (hull shader), but we use fractional_even here as the default since it
+      // provides smooth results. The TCS sets the actual tessellation levels.
+      // For now, use fractional_even as it's more compatible.
+      builder_->addExecutionMode(function_main_,
+                                 spv::ExecutionModeSpacingFractionalEven);
+      // Vertex ordering - counter-clockwise (Vulkan default for front face).
+      builder_->addExecutionMode(function_main_,
+                                 spv::ExecutionModeVertexOrderCcw);
+    } else {
+      execution_model = spv::ExecutionModelVertex;
+    }
   }
   if (features_.denorm_flush_to_zero_float32) {
     // Flush to zero, similar to the real hardware, also for things like Shader
@@ -1193,13 +1278,21 @@ void SpirvShaderTranslator::StartVertexOrTessEvalShaderBeforeMain() {
     input_primitive_id_ = builder_->createVariable(
         spv::NoPrecision, spv::StorageClassInput, type_int_, "gl_PrimitiveID");
     builder_->addDecoration(input_primitive_id_, spv::DecorationBuiltIn,
-                            spv::BuiltInPrimitiveId);
+                            static_cast<int>(spv::BuiltIn::PrimitiveId));
     main_interface_.push_back(input_primitive_id_);
+
+    // Tessellation coordinates (barycentric coordinates for the tessellated
+    // vertex within the patch).
+    input_tess_coord_ = builder_->createVariable(
+        spv::NoPrecision, spv::StorageClassInput, type_float3_, "gl_TessCoord");
+    builder_->addDecoration(input_tess_coord_, spv::DecorationBuiltIn,
+                            static_cast<int>(spv::BuiltIn::TessCoord));
+    main_interface_.push_back(input_tess_coord_);
   } else {
     input_vertex_index_ = builder_->createVariable(
         spv::NoPrecision, spv::StorageClassInput, type_int_, "gl_VertexIndex");
     builder_->addDecoration(input_vertex_index_, spv::DecorationBuiltIn,
-                            spv::BuiltInVertexIndex);
+                            static_cast<int>(spv::BuiltIn::VertexIndex));
     main_interface_.push_back(input_vertex_index_);
   }
 
@@ -1258,13 +1351,90 @@ void SpirvShaderTranslator::StartVertexOrTessEvalShaderBeforeMain() {
   std::vector<spv::Id> struct_per_vertex_members;
   struct_per_vertex_members.reserve(kOutputPerVertexMemberCount);
   struct_per_vertex_members.push_back(type_float4_);
+
+  // Only allocate ClipDistance/CullDistance arrays when user clip planes are
+  // actually enabled (count > 0).
+  uint32_t user_clip_plane_count =
+      shader_modification.vertex.user_clip_plane_count;
+  uint32_t clip_distance_count = 0;
+  uint32_t cull_distance_count = 0;
+  if (shader_modification.vertex.user_clip_plane_cull) {
+    cull_distance_count = user_clip_plane_count;
+  } else {
+    clip_distance_count = user_clip_plane_count;
+  }
+  // Vertex kill with "and" operator writes a dedicated cull distance after
+  // the user clip plane cull distances.
+  if (shader_modification.vertex.vertex_kill_and) {
+    ++cull_distance_count;
+  }
+  output_per_vertex_clip_distance_member_index_ = 0;
+  output_per_vertex_cull_distance_member_index_ = 0;
+  if (user_clip_plane_count > 0) {
+    // Create separate uniform buffer for clip planes.
+    spv::Id type_float4_array_6 = builder_->makeArrayType(
+        type_float4_, builder_->makeUintConstant(6), sizeof(float) * 4);
+    builder_->addDecoration(type_float4_array_6, spv::DecorationArrayStride,
+                            sizeof(float) * 4);
+    std::vector<spv::Id> clip_plane_struct_members;
+    clip_plane_struct_members.push_back(type_float4_array_6);
+    spv::Id type_clip_plane_constants = builder_->makeStructType(
+        clip_plane_struct_members, "XeClipPlaneConstants");
+    builder_->addMemberDecoration(type_clip_plane_constants, 0,
+                                  spv::DecorationOffset, 0);
+    builder_->addDecoration(type_clip_plane_constants, spv::DecorationBlock);
+    uniform_clip_plane_constants_ = builder_->createVariable(
+        spv::NoPrecision, spv::StorageClassUniform, type_clip_plane_constants,
+        "xe_uniform_clip_planes");
+    builder_->addDecoration(uniform_clip_plane_constants_,
+                            spv::DecorationDescriptorSet,
+                            int(kDescriptorSetConstants));
+    builder_->addDecoration(uniform_clip_plane_constants_,
+                            spv::DecorationBinding,
+                            int(kConstantBufferClipPlanes));
+    if (features_.spirv_version >= spv::Spv_1_4) {
+      main_interface_.push_back(uniform_clip_plane_constants_);
+    }
+  }
+  if (clip_distance_count > 0) {
+    output_per_vertex_clip_distance_member_index_ =
+        static_cast<unsigned int>(struct_per_vertex_members.size());
+    struct_per_vertex_members.push_back(builder_->makeArrayType(
+        type_float_, builder_->makeUintConstant(clip_distance_count), 0));
+  }
+  if (cull_distance_count > 0) {
+    output_per_vertex_cull_distance_member_index_ =
+        static_cast<unsigned int>(struct_per_vertex_members.size());
+    struct_per_vertex_members.push_back(builder_->makeArrayType(
+        type_float_, builder_->makeUintConstant(cull_distance_count), 0));
+  }
+
   spv::Id type_struct_per_vertex =
       builder_->makeStructType(struct_per_vertex_members, "gl_PerVertex");
   builder_->addMemberName(type_struct_per_vertex,
                           kOutputPerVertexMemberPosition, "gl_Position");
-  builder_->addMemberDecoration(type_struct_per_vertex,
-                                kOutputPerVertexMemberPosition,
-                                spv::DecorationBuiltIn, spv::BuiltInPosition);
+  builder_->addMemberDecoration(
+      type_struct_per_vertex, kOutputPerVertexMemberPosition,
+      spv::DecorationBuiltIn, static_cast<int>(spv::BuiltIn::Position));
+
+  // Decorate clip/cull arrays only if allocated.
+  if (clip_distance_count > 0) {
+    builder_->addMemberName(type_struct_per_vertex,
+                            output_per_vertex_clip_distance_member_index_,
+                            "gl_ClipDistance");
+    builder_->addMemberDecoration(
+        type_struct_per_vertex, output_per_vertex_clip_distance_member_index_,
+        spv::DecorationBuiltIn, static_cast<int>(spv::BuiltIn::ClipDistance));
+  }
+  if (cull_distance_count > 0) {
+    builder_->addMemberName(type_struct_per_vertex,
+                            output_per_vertex_cull_distance_member_index_,
+                            "gl_CullDistance");
+    builder_->addMemberDecoration(
+        type_struct_per_vertex, output_per_vertex_cull_distance_member_index_,
+        spv::DecorationBuiltIn, static_cast<int>(spv::BuiltIn::CullDistance));
+  }
+
   builder_->addDecoration(type_struct_per_vertex, spv::DecorationBlock);
   output_per_vertex_ = builder_->createVariable(
       spv::NoPrecision, spv::StorageClassOutput, type_struct_per_vertex, "");
@@ -1350,8 +1520,166 @@ void SpirvShaderTranslator::StartVertexOrTessEvalShaderInMain() {
 
   // Load the vertex index or the tessellation parameters.
   if (register_count()) {
-    // TODO(Triang3l): Barycentric coordinates and patch index.
-    if (IsSpirvVertexShader()) {
+    if (IsSpirvTessEvalShader()) {
+      // Tessellation evaluation shader (domain shader).
+      // Copy barycentric coordinates (gl_TessCoord) to r0 with appropriate
+      // swizzle based on the domain type.
+      Shader::HostVertexShaderType host_type =
+          shader_modification.vertex.host_vertex_shader_type;
+
+      spv::Id tess_coord =
+          builder_->createLoad(input_tess_coord_, spv::NoPrecision);
+
+      switch (host_type) {
+        case Shader::HostVertexShaderType::kTriangleDomainCPIndexed:
+        case Shader::HostVertexShaderType::kTriangleDomainPatchIndexed: {
+          // Triangle domain requires at least 2 registers (r0 for barycentric,
+          // r1 for control point indices or patch index).
+          assert_true(register_count() >= 2);
+          // Triangle domain: gl_TessCoord.xyz -> r0.zyx
+          // ZYX swizzle according to 415607E1 and 4D5307F2.
+          uint_vector_temp_.clear();
+          uint_vector_temp_.push_back(2);  // z -> r0.x
+          uint_vector_temp_.push_back(1);  // y -> r0.y
+          uint_vector_temp_.push_back(0);  // x -> r0.z
+          spv::Id tess_coord_zyx = builder_->createRvalueSwizzle(
+              spv::NoPrecision, type_float3_, tess_coord, uint_vector_temp_);
+          // Store to r0.xyz
+          id_vector_temp_.clear();
+          id_vector_temp_.push_back(const_int_0_);
+          spv::Id r0_ptr = builder_->createAccessChain(
+              spv::StorageClassFunction, var_main_registers_, id_vector_temp_);
+          // Build float4 from swizzled xyz and w=1.0
+          id_vector_temp_.clear();
+          id_vector_temp_.push_back(
+              builder_->createCompositeExtract(tess_coord_zyx, type_float_, 0));
+          id_vector_temp_.push_back(
+              builder_->createCompositeExtract(tess_coord_zyx, type_float_, 1));
+          id_vector_temp_.push_back(
+              builder_->createCompositeExtract(tess_coord_zyx, type_float_, 2));
+          id_vector_temp_.push_back(const_float_1_);
+          builder_->createStore(
+              builder_->createCompositeConstruct(type_float4_, id_vector_temp_),
+              r0_ptr);
+          break;
+        }
+        case Shader::HostVertexShaderType::kQuadDomainCPIndexed: {
+          // Quad domain requires at least 2 registers (r0 for domain location,
+          // r1 for control point indices).
+          assert_true(register_count() >= 2);
+          // Quad domain CP-indexed: gl_TessCoord.xy -> r0.yz, r0.x = 0, r0.w =
+          // 1 XY swizzle according to the ground shader in 4D5307F2.
+          uint_vector_temp_.clear();
+          uint_vector_temp_.push_back(0);  // x -> r0.y
+          uint_vector_temp_.push_back(1);  // y -> r0.z
+          spv::Id tess_coord_xy = builder_->createRvalueSwizzle(
+              spv::NoPrecision, type_float2_, tess_coord, uint_vector_temp_);
+          // Store to r0
+          id_vector_temp_.clear();
+          id_vector_temp_.push_back(const_int_0_);
+          spv::Id r0_ptr = builder_->createAccessChain(
+              spv::StorageClassFunction, var_main_registers_, id_vector_temp_);
+          // Build float4 with x=0, yz from tess coord, w=1
+          id_vector_temp_.clear();
+          id_vector_temp_.push_back(const_float_0_);
+          id_vector_temp_.push_back(
+              builder_->createCompositeExtract(tess_coord_xy, type_float_, 0));
+          id_vector_temp_.push_back(
+              builder_->createCompositeExtract(tess_coord_xy, type_float_, 1));
+          id_vector_temp_.push_back(const_float_1_);
+          builder_->createStore(
+              builder_->createCompositeConstruct(type_float4_, id_vector_temp_),
+              r0_ptr);
+          break;
+        }
+        case Shader::HostVertexShaderType::kQuadDomainPatchIndexed: {
+          // Quad domain requires at least 2 registers (r0 for domain location
+          // and patch index, r1 for swizzle indicator).
+          assert_true(register_count() >= 2);
+          // Quad domain patch-indexed: gl_TessCoord.xy -> r0.yz,
+          // patch index -> r0.x, r0.w = 1
+          // XY swizzle according to the ground shader in 4D5307F2.
+          uint_vector_temp_.clear();
+          uint_vector_temp_.push_back(0);  // x -> r0.y
+          uint_vector_temp_.push_back(1);  // y -> r0.z
+          spv::Id tess_coord_xy = builder_->createRvalueSwizzle(
+              spv::NoPrecision, type_float2_, tess_coord, uint_vector_temp_);
+          // Load primitive ID (patch index) and convert to float.
+          spv::Id primitive_id =
+              builder_->createLoad(input_primitive_id_, spv::NoPrecision);
+          spv::Id patch_index_float = builder_->createUnaryOp(
+              spv::OpConvertSToF, type_float_, primitive_id);
+          // Store to r0: x = patch index, yz = tess coord, w = 1
+          id_vector_temp_.clear();
+          id_vector_temp_.push_back(const_int_0_);
+          spv::Id r0_ptr = builder_->createAccessChain(
+              spv::StorageClassFunction, var_main_registers_, id_vector_temp_);
+          id_vector_temp_.clear();
+          id_vector_temp_.push_back(patch_index_float);
+          id_vector_temp_.push_back(
+              builder_->createCompositeExtract(tess_coord_xy, type_float_, 0));
+          id_vector_temp_.push_back(
+              builder_->createCompositeExtract(tess_coord_xy, type_float_, 1));
+          id_vector_temp_.push_back(const_float_1_);
+          builder_->createStore(
+              builder_->createCompositeConstruct(type_float4_, id_vector_temp_),
+              r0_ptr);
+          // Also set r1.x = 0.0f (swizzle indicator for identity swizzle).
+          if (register_count() >= 2) {
+            id_vector_temp_.clear();
+            id_vector_temp_.push_back(builder_->makeIntConstant(1));
+            id_vector_temp_.push_back(const_int_0_);
+            builder_->createStore(const_float_0_,
+                                  builder_->createAccessChain(
+                                      spv::StorageClassFunction,
+                                      var_main_registers_, id_vector_temp_));
+          }
+          break;
+        }
+        case Shader::HostVertexShaderType::kLineDomainCPIndexed:
+        case Shader::HostVertexShaderType::kLineDomainPatchIndexed:
+          // Line domain tessellation is not yet implemented.
+          XELOGE(
+              "SPIRV: Line domain tessellation not implemented for host type "
+              "{}",
+              static_cast<uint32_t>(host_type));
+          assert_unhandled_case(host_type);
+          break;
+        default:
+          break;
+      }
+
+      // For triangle patch-indexed mode, store patch index to r1.x and
+      // swizzle indicator (0.0f) to r1.y.
+      if (register_count() >= 2) {
+        if (host_type ==
+            Shader::HostVertexShaderType::kTriangleDomainPatchIndexed) {
+          // Load primitive ID (patch index) and convert to float.
+          spv::Id primitive_id =
+              builder_->createLoad(input_primitive_id_, spv::NoPrecision);
+          spv::Id patch_index_float = builder_->createUnaryOp(
+              spv::OpConvertSToF, type_float_, primitive_id);
+          // Store patch index to r1.x
+          id_vector_temp_.clear();
+          id_vector_temp_.push_back(builder_->makeIntConstant(1));
+          id_vector_temp_.push_back(const_int_0_);
+          builder_->createStore(patch_index_float,
+                                builder_->createAccessChain(
+                                    spv::StorageClassFunction,
+                                    var_main_registers_, id_vector_temp_));
+          // Store swizzle indicator (0.0f = identity) to r1.y
+          // According to D3D12 implementation and comments in
+          // adaptive_triangle.hs.glsl, r1.y == 0 means identity swizzle.
+          id_vector_temp_.clear();
+          id_vector_temp_.push_back(builder_->makeIntConstant(1));
+          id_vector_temp_.push_back(builder_->makeIntConstant(1));
+          builder_->createStore(const_float_0_,
+                                builder_->createAccessChain(
+                                    spv::StorageClassFunction,
+                                    var_main_registers_, id_vector_temp_));
+        }
+      }
+    } else if (IsSpirvVertexShader()) {
       spv::Id vertex_index = builder_->createUnaryOp(
           spv::OpBitcast, type_uint_,
           builder_->createLoad(input_vertex_index_, spv::NoPrecision));
@@ -1516,6 +1844,8 @@ void SpirvShaderTranslator::StartVertexOrTessEvalShaderInMain() {
 }
 
 void SpirvShaderTranslator::CompleteVertexOrTessEvalShaderInMain() {
+  Modification shader_modification = GetSpirvShaderModification();
+
   id_vector_temp_.clear();
   id_vector_temp_.push_back(
       builder_->makeIntConstant(kOutputPerVertexMemberPosition));
@@ -1597,6 +1927,61 @@ void SpirvShaderTranslator::CompleteVertexOrTessEvalShaderInMain() {
     }
   }
 
+  // Compute user clip/cull distances BEFORE NDC transform.
+  // Clip planes must operate on the original clip-space position.
+  uint32_t user_clip_plane_count =
+      shader_modification.vertex.user_clip_plane_count;
+  if (user_clip_plane_count > 0) {
+    // Reconstruct the original clip-space position (x, y, z, w) for dot
+    // product. Use the untransformed position_xyz and corrected position_w.
+    spv::Id clip_space_position;
+    {
+      std::unique_ptr<spv::Instruction> composite_construct_op =
+          std::make_unique<spv::Instruction>(
+              builder_->getUniqueId(), type_float4_, spv::OpCompositeConstruct);
+      composite_construct_op->addIdOperand(position_xyz);
+      composite_construct_op->addIdOperand(position_w);
+      clip_space_position = composite_construct_op->getResultId();
+      builder_->getBuildPoint()->addInstruction(
+          std::move(composite_construct_op));
+    }
+
+    // Determine which member index to use based on whether we're using
+    // ClipDistance or CullDistance.
+    bool user_clip_plane_cull = shader_modification.vertex.user_clip_plane_cull;
+    unsigned int clip_cull_distance_member_index =
+        user_clip_plane_cull ? output_per_vertex_cull_distance_member_index_
+                             : output_per_vertex_clip_distance_member_index_;
+
+    // Compute distance to each enabled user clip plane via dot product.
+    for (uint32_t i = 0; i < user_clip_plane_count; ++i) {
+      // Load user clip plane from separate clip plane constants buffer.
+      id_vector_temp_.clear();
+      id_vector_temp_.push_back(
+          builder_->makeIntConstant(0));  // Struct member 0
+      id_vector_temp_.push_back(
+          builder_->makeIntConstant(int(i)));  // Array index
+      spv::Id clip_plane = builder_->createLoad(
+          builder_->createAccessChain(spv::StorageClassUniform,
+                                      uniform_clip_plane_constants_,
+                                      id_vector_temp_),
+          spv::NoPrecision);
+
+      // Compute dot product: distance = dot(clip_space_position, clip_plane).
+      spv::Id distance = builder_->createBinOp(spv::OpDot, type_float_,
+                                               clip_space_position, clip_plane);
+
+      // Store to gl_ClipDistance[i] or gl_CullDistance[i].
+      id_vector_temp_.clear();
+      id_vector_temp_.push_back(
+          builder_->makeIntConstant(clip_cull_distance_member_index));
+      id_vector_temp_.push_back(builder_->makeIntConstant(int(i)));
+      spv::Id distance_ptr = builder_->createAccessChain(
+          spv::StorageClassOutput, output_per_vertex_, id_vector_temp_);
+      builder_->createStore(distance, distance_ptr);
+    }
+  }
+
   // Apply the NDC scale and offset for guest to host viewport transformation.
   id_vector_temp_.clear();
   id_vector_temp_.push_back(builder_->makeIntConstant(kSystemConstantNdcScale));
@@ -1618,6 +2003,58 @@ void SpirvShaderTranslator::CompleteVertexOrTessEvalShaderInMain() {
   position_xyz = builder_->createNoContractionBinOp(
       spv::OpFAdd, type_float3_, position_xyz, ndc_offset_mul_w);
 
+  // Apply vertex killing requested via the kill flag (oPts.z) - bits 0:30 of
+  // the value being non-zero kills. Done after the NDC transform since the kill
+  // cull distance is just a flag and the position is about to be written.
+  if (current_shader().writes_point_size_edge_flag_kill_vertex() & 0b100) {
+    assert_true(var_main_point_size_edge_flag_kill_vertex_ != spv::NoResult);
+    id_vector_temp_.clear();
+    // Z vector component.
+    id_vector_temp_.push_back(builder_->makeIntConstant(2));
+    spv::Id kill_value = builder_->createLoad(
+        builder_->createAccessChain(spv::StorageClassFunction,
+                                    var_main_point_size_edge_flag_kill_vertex_,
+                                    id_vector_temp_),
+        spv::NoPrecision);
+    // Test the integer bits 0:30 rather than comparing the float to avoid
+    // denormal flushing affecting the result (matching the Direct3D 12 path).
+    spv::Id vertex_killed = builder_->createBinOp(
+        spv::OpINotEqual, type_bool_,
+        builder_->createBinOp(
+            spv::OpBitwiseAnd, type_uint_,
+            builder_->createUnaryOp(spv::OpBitcast, type_uint_, kill_value),
+            builder_->makeUintConstant(UINT32_C(0x7FFFFFFF))),
+        const_uint_0_);
+    if (shader_modification.vertex.vertex_kill_and) {
+      // "and" operator - write -1 to the dedicated cull distance when killed
+      // (the primitive is culled only if it's negative for all the vertices).
+      uint32_t vertex_kill_cull_distance_index =
+          shader_modification.vertex.user_clip_plane_cull
+              ? user_clip_plane_count
+              : 0;
+      id_vector_temp_.clear();
+      id_vector_temp_.push_back(builder_->makeIntConstant(
+          int(output_per_vertex_cull_distance_member_index_)));
+      id_vector_temp_.push_back(
+          builder_->makeIntConstant(int(vertex_kill_cull_distance_index)));
+      builder_->createStore(
+          builder_->createTriOp(spv::OpSelect, type_float_, vertex_killed,
+                                builder_->makeFloatConstant(-1.0f),
+                                const_float_0_),
+          builder_->createAccessChain(spv::StorageClassOutput,
+                                      output_per_vertex_, id_vector_temp_));
+    } else {
+      // "or" operator - setting the position W to NaN kills the whole primitive
+      // if any of its vertices requests the kill.
+      position_w = builder_->createTriOp(
+          spv::OpSelect, type_float_, vertex_killed,
+          builder_->createUnaryOp(
+              spv::OpBitcast, type_float_,
+              builder_->makeUintConstant(UINT32_C(0x7FC00000))),
+          position_w);
+    }
+  }
+
   // Write the point size.
   if (output_point_size_ != spv::NoResult) {
     spv::Id point_size;
@@ -1637,8 +2074,6 @@ void SpirvShaderTranslator::CompleteVertexOrTessEvalShaderInMain() {
     }
     builder_->createStore(point_size, output_point_size_);
   }
-
-  Modification shader_modification = GetSpirvShaderModification();
 
   // Expand the point sprite.
   if (shader_modification.vertex.host_vertex_shader_type ==
@@ -1809,6 +2244,37 @@ void SpirvShaderTranslator::StartFragmentShaderBeforeMain() {
     if (features_.spirv_version >= spv::Spv_1_4) {
       main_interface_.push_back(buffer_edram_);
     }
+
+    // ZPD FSI counter buffer uint[].
+    id_vector_temp_.clear();
+    id_vector_temp_.push_back(builder_->makeRuntimeArray(type_uint_));
+    builder_->addDecoration(id_vector_temp_.back(), spv::DecorationArrayStride,
+                            sizeof(uint32_t));
+    spv::Id type_zpd_fsi_counter =
+        builder_->makeStructType(id_vector_temp_, "XeZPDFSICounter");
+    builder_->addMemberName(type_zpd_fsi_counter, 0, "counter");
+    builder_->addMemberDecoration(type_zpd_fsi_counter, 0,
+                                  spv::DecorationCoherent);
+    builder_->addMemberDecoration(type_zpd_fsi_counter, 0,
+                                  spv::DecorationRestrict);
+    builder_->addMemberDecoration(type_zpd_fsi_counter, 0,
+                                  spv::DecorationOffset, 0);
+    builder_->addDecoration(type_zpd_fsi_counter,
+                            features_.spirv_version >= spv::Spv_1_3
+                                ? spv::DecorationBlock
+                                : spv::DecorationBufferBlock);
+    buffer_zpd_fsi_counter_ = builder_->createVariable(
+        spv::NoPrecision,
+        features_.spirv_version >= spv::Spv_1_3 ? spv::StorageClassStorageBuffer
+                                                : spv::StorageClassUniform,
+        type_zpd_fsi_counter, "xe_zpd_fsi_counter");
+    builder_->addDecoration(buffer_zpd_fsi_counter_,
+                            spv::DecorationDescriptorSet,
+                            int(kDescriptorSetSharedMemoryAndEdram));
+    builder_->addDecoration(buffer_zpd_fsi_counter_, spv::DecorationBinding, 2);
+    if (features_.spirv_version >= spv::Spv_1_4) {
+      main_interface_.push_back(buffer_zpd_fsi_counter_);
+    }
   }
 
   bool param_gen_needed = !is_depth_only_fragment_shader_ &&
@@ -1854,25 +2320,42 @@ void SpirvShaderTranslator::StartFragmentShaderBeforeMain() {
   }
 
   // Fragment coordinates.
-  // TODO(Triang3l): More conditions - alpha to coverage (if RT 0 is written,
-  // and there's no early depth / stencil), depth writing in the fragment shader
-  // (per-sample if supported).
-  if (edram_fragment_shader_interlock_ || param_gen_needed) {
+  // FSI: Always needed for EDRAM offset calculation and depth derivatives.
+  // param_gen: Needed for PsParamGen calculation.
+  // FBO alpha-to-coverage: Needed for dithering pattern, but only when
+  // alpha-to-coverage can actually run (no early fragment tests).
+  // FBO float24 in-PS conversion of the rasterizer's depth: reads
+  // gl_FragCoord.z
+  // - and must do so per-sample for MSAA antialiasing of intersections.
+  bool need_frag_coord =
+      edram_fragment_shader_interlock_ || param_gen_needed || IsSampleRate() ||
+      DSV_IsApplyingPolygonOffset() ||
+      (!edram_fragment_shader_interlock_ && !is_depth_only_fragment_shader_ &&
+       current_shader().writes_color_target(0) &&
+       !IsExecutionModeEarlyFragmentTests());
+  if (need_frag_coord) {
     input_fragment_coordinates_ = builder_->createVariable(
         spv::NoPrecision, spv::StorageClassInput, type_float4_, "gl_FragCoord");
     builder_->addDecoration(input_fragment_coordinates_, spv::DecorationBuiltIn,
-                            spv::BuiltInFragCoord);
+                            static_cast<int>(spv::BuiltIn::FragCoord));
+    if (IsSampleRate()) {
+      // Per the Vulkan spec, a Sample-decorated fragment input forces
+      // per-sample shader invocation - no explicit sampleShadingEnable needed.
+      builder_->addCapability(spv::CapabilitySampleRateShading);
+      builder_->addDecoration(input_fragment_coordinates_,
+                              spv::DecorationSample);
+    }
     main_interface_.push_back(input_fragment_coordinates_);
   }
 
   // Is front facing.
-  if (edram_fragment_shader_interlock_ ||
+  if (edram_fragment_shader_interlock_ || DSV_IsApplyingPolygonOffset() ||
       (param_gen_needed &&
        !GetSpirvShaderModification().pixel.param_gen_point)) {
     input_front_facing_ = builder_->createVariable(
         spv::NoPrecision, spv::StorageClassInput, type_bool_, "gl_FrontFacing");
     builder_->addDecoration(input_front_facing_, spv::DecorationBuiltIn,
-                            spv::BuiltInFrontFacing);
+                            static_cast<int>(spv::BuiltIn::FrontFacing));
     main_interface_.push_back(input_front_facing_);
   }
 
@@ -1886,15 +2369,19 @@ void SpirvShaderTranslator::StartFragmentShaderBeforeMain() {
         "gl_SampleMaskIn");
     builder_->addDecoration(input_sample_mask_, spv::DecorationFlat);
     builder_->addDecoration(input_sample_mask_, spv::DecorationBuiltIn,
-                            spv::BuiltInSampleMask);
+                            static_cast<int>(spv::BuiltIn::SampleMask));
     main_interface_.push_back(input_sample_mask_);
   }
 
   if (!is_depth_only_fragment_shader_) {
-    // Framebuffer color attachment outputs.
+    // Framebuffer color attachment outputs (FBO path only).
+    // For FBO, we create Output variables here and Function-scoped variables
+    // in StartFragmentShaderInMain. The Function-scoped variables are used
+    // throughout the shader (so we can read them for alpha test), and copied
+    // to the Output variables at the end.
     if (!edram_fragment_shader_interlock_) {
-      std::fill(output_or_var_fragment_data_.begin(),
-                output_or_var_fragment_data_.end(), spv::NoResult);
+      std::fill(output_fragment_data_.begin(), output_fragment_data_.end(),
+                spv::NoResult);
       static const char* const kFragmentDataOutputNames[] = {
           "xe_out_fragment_data_0",
           "xe_out_fragment_data_1",
@@ -1910,8 +2397,7 @@ void SpirvShaderTranslator::StartFragmentShaderBeforeMain() {
         spv::Id output_fragment_data_rt = builder_->createVariable(
             spv::NoPrecision, spv::StorageClassOutput, type_float4_,
             kFragmentDataOutputNames[color_target_index]);
-        output_or_var_fragment_data_[color_target_index] =
-            output_fragment_data_rt;
+        output_fragment_data_[color_target_index] = output_fragment_data_rt;
         builder_->addDecoration(output_fragment_data_rt,
                                 spv::DecorationLocation,
                                 int(color_target_index));
@@ -1922,6 +2408,35 @@ void SpirvShaderTranslator::StartFragmentShaderBeforeMain() {
         main_interface_.push_back(output_fragment_data_rt);
       }
     }
+  }
+
+  // FBO fragment depth output. Used for guest oDepth, float24 conversion, and
+  // the narrow host RT decal path. FSI manages depth in EDRAM instead.
+  if (!edram_fragment_shader_interlock_ &&
+      (current_shader().writes_depth() || DSV_IsWritingFloat24Depth() ||
+       DSV_IsApplyingPolygonOffset())) {
+    output_fragment_depth_ = builder_->createVariable(
+        spv::NoPrecision, spv::StorageClassOutput, type_float_, "gl_FragDepth");
+    builder_->addDecoration(output_fragment_depth_, spv::DecorationBuiltIn,
+                            static_cast<int>(spv::BuiltIn::FragDepth));
+    builder_->addDecoration(output_fragment_depth_, spv::DecorationInvariant);
+    main_interface_.push_back(output_fragment_depth_);
+  }
+
+  // Sample mask output for alpha-to-coverage.
+  // Only needed for non-FSI mode. FSI uses main_fsi_sample_mask_ instead.
+  output_fragment_sample_mask_ = spv::NoResult;
+  if (!edram_fragment_shader_interlock_ && !is_depth_only_fragment_shader_) {
+    // gl_SampleMask is an array of int in SPIR-V.
+    spv::Id type_sample_mask_array =
+        builder_->makeArrayType(type_int_, builder_->makeUintConstant(1), 0);
+    output_fragment_sample_mask_ =
+        builder_->createVariable(spv::NoPrecision, spv::StorageClassOutput,
+                                 type_sample_mask_array, "gl_SampleMask");
+    builder_->addDecoration(output_fragment_sample_mask_,
+                            spv::DecorationBuiltIn,
+                            static_cast<int>(spv::BuiltIn::SampleMask));
+    main_interface_.push_back(output_fragment_sample_mask_);
   }
 }
 
@@ -1952,34 +2467,64 @@ void SpirvShaderTranslator::StartFragmentShaderInMain() {
     // to the execution mask GPUs naturally have.
   }
 
-  if (edram_fragment_shader_interlock_) {
-    // Initialize color output variables with fragment shader interlock.
-    std::fill(output_or_var_fragment_data_.begin(),
-              output_or_var_fragment_data_.end(), spv::NoResult);
-    var_main_fsi_color_written_ = spv::NoResult;
-    uint32_t color_targets_written = current_shader().writes_color_targets();
-    if (color_targets_written) {
-      static const char* const kFragmentDataVariableNames[] = {
-          "xe_var_fragment_data_0",
-          "xe_var_fragment_data_1",
-          "xe_var_fragment_data_2",
-          "xe_var_fragment_data_3",
-      };
-      uint32_t color_targets_remaining = color_targets_written;
-      uint32_t color_target_index;
-      while (
-          xe::bit_scan_forward(color_targets_remaining, &color_target_index)) {
-        color_targets_remaining &= ~(UINT32_C(1) << color_target_index);
-        output_or_var_fragment_data_[color_target_index] =
-            builder_->createVariable(
-                spv::NoPrecision, spv::StorageClassFunction, type_float4_,
-                kFragmentDataVariableNames[color_target_index],
-                const_float4_0_);
-      }
-      var_main_fsi_color_written_ = builder_->createVariable(
-          spv::NoPrecision, spv::StorageClassFunction, type_uint_,
-          "xe_var_fsi_color_written", const_uint_0_);
+  // Initialize color output variables as Function-scoped for both FSI and FBO.
+  // For FBO, this allows reading the color values back (e.g., for alpha test),
+  // which isn't possible with Output storage class. The values are copied to
+  // the actual Output variables at the end of the shader for FBO.
+  std::fill(output_or_var_fragment_data_.begin(),
+            output_or_var_fragment_data_.end(), spv::NoResult);
+  var_main_fsi_color_written_ = spv::NoResult;
+  uint32_t color_targets_written = current_shader().writes_color_targets();
+  if (color_targets_written && !is_depth_only_fragment_shader_) {
+    static const char* const kFragmentDataVariableNames[] = {
+        "xe_var_fragment_data_0",
+        "xe_var_fragment_data_1",
+        "xe_var_fragment_data_2",
+        "xe_var_fragment_data_3",
+    };
+    uint32_t color_targets_remaining = color_targets_written;
+    uint32_t color_target_index;
+    while (xe::bit_scan_forward(color_targets_remaining, &color_target_index)) {
+      color_targets_remaining &= ~(UINT32_C(1) << color_target_index);
+      output_or_var_fragment_data_[color_target_index] =
+          builder_->createVariable(
+              spv::NoPrecision, spv::StorageClassFunction, type_float4_,
+              kFragmentDataVariableNames[color_target_index], const_float4_0_);
     }
+    // Color write tracking for both FSI and FBO paths.
+    // This is used to conditionally skip alpha test / alpha-to-coverage if
+    // render target 0 wasn't written on the execution path.
+    var_main_fsi_color_written_ = builder_->createVariable(
+        spv::NoPrecision, spv::StorageClassFunction, type_uint_,
+        "xe_var_color_written", const_uint_0_);
+  }
+
+  // Staging variable for guest oDepth writes.
+  // Created whenever the shader uses oDepth:
+  //   * FSI reads it during its EDRAM depth write inside the interlock.
+  //   * FBO copies it to gl_FragDepth at the end of the shader.
+  if (current_shader().writes_depth()) {
+    output_or_var_fragment_depth_ = builder_->createVariable(
+        spv::NoPrecision, spv::StorageClassFunction, type_float_,
+        "xe_var_fragment_depth", const_float_0_);
+  }
+
+  if (DSV_IsApplyingPolygonOffset()) {
+    // The decal path needs the original triangle depth slope, not the slope of
+    // whichever lanes survive guest control flow or kill.
+    assert_true(input_fragment_coordinates_ != spv::NoResult);
+    id_vector_temp_.clear();
+    id_vector_temp_.push_back(builder_->makeIntConstant(2));
+    main_fbo_depth_unbiased_ =
+        builder_->createLoad(builder_->createAccessChain(
+                                 spv::StorageClassInput,
+                                 input_fragment_coordinates_, id_vector_temp_),
+                             spv::NoPrecision);
+    builder_->addCapability(spv::CapabilityDerivativeControl);
+    main_fbo_depth_derivatives_[0] = builder_->createUnaryOp(
+        spv::OpDPdxCoarse, type_float_, main_fbo_depth_unbiased_);
+    main_fbo_depth_derivatives_[1] = builder_->createUnaryOp(
+        spv::OpDPdyCoarse, type_float_, main_fbo_depth_unbiased_);
   }
 
   if (edram_fragment_shader_interlock_ && FSI_IsDepthStencilEarly()) {
@@ -2096,10 +2641,11 @@ void SpirvShaderTranslator::StartFragmentShaderInMain() {
                                             id_vector_temp_),
                 spv::NoPrecision)));
     // Apply resolution scale inversion after truncating.
-    if (draw_resolution_scale_x_ > 1) {
+    if (GetCurrentDrawResolutionScaleX() > 1) {
       param_gen_x = builder_->createBinOp(
           spv::OpFMul, type_float_, param_gen_x,
-          builder_->makeFloatConstant(1.0f / float(draw_resolution_scale_x_)));
+          builder_->makeFloatConstant(1.0f /
+                                      float(GetCurrentDrawResolutionScaleX())));
     }
     if (!modification.pixel.param_gen_point) {
       assert_true(input_front_facing_ != spv::NoResult);
@@ -2137,10 +2683,11 @@ void SpirvShaderTranslator::StartFragmentShaderInMain() {
                                             id_vector_temp_),
                 spv::NoPrecision)));
     // Apply resolution scale inversion after truncating.
-    if (draw_resolution_scale_y_ > 1) {
+    if (GetCurrentDrawResolutionScaleY() > 1) {
       param_gen_y = builder_->createBinOp(
           spv::OpFMul, type_float_, param_gen_y,
-          builder_->makeFloatConstant(1.0f / float(draw_resolution_scale_y_)));
+          builder_->makeFloatConstant(1.0f /
+                                      float(GetCurrentDrawResolutionScaleY())));
     }
     if (modification.pixel.param_gen_point) {
       param_gen_y = builder_->createUnaryOp(
@@ -2194,16 +2741,6 @@ void SpirvShaderTranslator::StartFragmentShaderInMain() {
     builder_->createStore(param_gen, builder_->createAccessChain(
                                          spv::StorageClassFunction,
                                          var_main_registers_, id_vector_temp_));
-  }
-
-  if (!edram_fragment_shader_interlock_) {
-    // Initialize the colors for safety.
-    for (uint32_t i = 0; i < xenos::kMaxColorRenderTargets; ++i) {
-      spv::Id output_fragment_data_rt = output_or_var_fragment_data_[i];
-      if (output_fragment_data_rt != spv::NoResult) {
-        builder_->createStore(const_float4_0_, output_fragment_data_rt);
-      }
-    }
   }
 }
 
@@ -2564,8 +3101,7 @@ void SpirvShaderTranslator::StoreResult(const InstructionResult& result,
       assert_not_zero(used_write_mask);
       assert_true(current_shader().writes_color_target(result.storage_index));
       target_pointer = output_or_var_fragment_data_[result.storage_index];
-      if (edram_fragment_shader_interlock_) {
-        assert_true(var_main_fsi_color_written_ != spv::NoResult);
+      if (var_main_fsi_color_written_ != spv::NoResult) {
         builder_->createStore(
             builder_->createBinOp(
                 spv::OpBitwiseOr, type_uint_,
@@ -2594,6 +3130,26 @@ void SpirvShaderTranslator::StoreResult(const InstructionResult& result,
                 builder_->makeUintConstant(uint32_t(1)
                                            << result.storage_index)),
             var_main_memexport_data_written_);
+      }
+    } break;
+    case InstructionStorageTarget::kDepth: {
+      // oDepth is scalar. The FBO path copies it to gl_FragDepth (in
+      // CompleteFragmentShader_DSV_DepthTo24Bit), while FSI writes it to a
+      // depth variable consumed by FSI_DepthStencilTest.
+      assert_true(is_pixel_shader());
+      assert_true(used_write_mask == 0b0001);
+      assert_true(current_shader().writes_depth());
+      assert_true(output_or_var_fragment_depth_ != spv::NoResult);
+      target_pointer = output_or_var_fragment_depth_;
+      // Depth outside [0, 1] needs to be clamped for safety, similar to D3D12.
+      // Though 20e4 float depth can store values between 1 and 2, it's a very
+      // unusual case. In Vulkan, gl_FragDepth can accept any values when the
+      // depth buffer is floating-point, but we clamp for consistency.
+      // Clamp the depth value to [0, 1] if not already saturated.
+      if (value != spv::NoResult && !result.is_clamped) {
+        value = builder_->createTriBuiltinCall(
+            type_float_, ext_inst_glsl_std_450_, GLSLstd450NClamp, value,
+            const_float_0_, const_float_1_);
       }
     } break;
     default:
@@ -2964,7 +3520,8 @@ spv::Id SpirvShaderTranslator::EndianSwap128Uint4(spv::Id value,
   uint_vector_temp_.push_back(3);
   uint_vector_temp_.push_back(2);
   value = builder_->createTriOp(
-      spv::OpSelect, type_uint4_, is_8in64,
+      spv::OpSelect, type_uint4_,
+      builder_->smearScalar(spv::NoPrecision, is_8in64, type_bool4_),
       builder_->createRvalueSwizzle(spv::NoPrecision, type_uint4_, value,
                                     uint_vector_temp_),
       value);
@@ -2979,7 +3536,8 @@ spv::Id SpirvShaderTranslator::EndianSwap128Uint4(spv::Id value,
   uint_vector_temp_.push_back(1);
   uint_vector_temp_.push_back(0);
   value = builder_->createTriOp(
-      spv::OpSelect, type_uint4_, is_8in128,
+      spv::OpSelect, type_uint4_,
+      builder_->smearScalar(spv::NoPrecision, is_8in128, type_bool4_),
       builder_->createRvalueSwizzle(spv::NoPrecision, type_uint4_, value,
                                     uint_vector_temp_),
       value);
@@ -3141,64 +3699,54 @@ void SpirvShaderTranslator::StoreUint32ToSharedMemory(
   binding_switch.makeEndSwitch();
 }
 
-spv::Id SpirvShaderTranslator::PWLGammaToLinear(spv::Id gamma,
-                                                bool gamma_pre_saturated) {
+spv::Id SpirvShaderTranslator::PWLGammaToLinear(
+    SpirvBuilder* builder_, spv::Id gamma, bool pre_saturated,
+    spv::Id ext_inst_glsl_std_450_) {
   spv::Id value_type = builder_->getTypeId(gamma);
   assert_true(builder_->isFloatType(builder_->getScalarTypeId(value_type)));
   bool is_vector = builder_->isVectorType(value_type);
   assert_true(is_vector || builder_->isFloatType(value_type));
   int num_components = builder_->getNumTypeComponents(value_type);
   assert_true(num_components < 4);
-  spv::Id bool_type = type_bool_vectors_[num_components - 1];
+  spv::Id bool_type = is_vector ? builder_->makeVectorType(
+                                      builder_->makeBoolType(), num_components)
+                                : builder_->makeBoolType();
 
-  spv::Id const_vector_0 = const_float_vectors_0_[num_components - 1];
-  spv::Id const_vector_1 = SpirvSmearScalarResultOrConstant(
-      builder_->makeFloatConstant(1.0f), value_type);
+  spv::Id const_vector_0 = builder_->smearFloatConstant(0.0f, value_type);
 
-  if (!gamma_pre_saturated) {
+  if (!pre_saturated) {
     // Saturate, flushing NaN to 0.
-    gamma = builder_->createTriBuiltinCall(value_type, ext_inst_glsl_std_450_,
-                                           GLSLstd450NClamp, gamma,
-                                           const_vector_0, const_vector_1);
+    gamma = builder_->createTriBuiltinCall(
+        value_type, ext_inst_glsl_std_450_, GLSLstd450NClamp, gamma,
+        const_vector_0, builder_->smearFloatConstant(1.0f, value_type));
   }
 
   spv::Id is_piece_at_least_3 = builder_->createBinOp(
       spv::OpFOrdGreaterThanEqual, bool_type, gamma,
-      SpirvSmearScalarResultOrConstant(
-          builder_->makeFloatConstant(192.0f / 255.0f), value_type));
+      builder_->smearFloatConstant(192.0f / 255.0f, value_type));
   spv::Id scale_3_or_2 = builder_->createTriOp(
       spv::OpSelect, value_type, is_piece_at_least_3,
-      SpirvSmearScalarResultOrConstant(
-          builder_->makeFloatConstant(8.0f / 1024.0f), value_type),
-      SpirvSmearScalarResultOrConstant(
-          builder_->makeFloatConstant(4.0f / 1024.0f), value_type));
-  spv::Id offset_3_or_2 = builder_->createTriOp(
-      spv::OpSelect, value_type, is_piece_at_least_3,
-      SpirvSmearScalarResultOrConstant(builder_->makeFloatConstant(-1024.0f),
-                                       value_type),
-      SpirvSmearScalarResultOrConstant(builder_->makeFloatConstant(-256.0f),
-                                       value_type));
+      builder_->smearFloatConstant(8.0f / 1024.0f, value_type),
+      builder_->smearFloatConstant(4.0f / 1024.0f, value_type));
+  spv::Id offset_3_or_2 =
+      builder_->createTriOp(spv::OpSelect, value_type, is_piece_at_least_3,
+                            builder_->smearFloatConstant(-1024.0f, value_type),
+                            builder_->smearFloatConstant(-256.0f, value_type));
 
   spv::Id is_piece_at_least_1 = builder_->createBinOp(
       spv::OpFOrdGreaterThanEqual, bool_type, gamma,
-      SpirvSmearScalarResultOrConstant(
-          builder_->makeFloatConstant(64.0f / 255.0f), value_type));
+      builder_->smearFloatConstant(64.0f / 255.0f, value_type));
   spv::Id scale_1_or_0 = builder_->createTriOp(
       spv::OpSelect, value_type, is_piece_at_least_1,
-      SpirvSmearScalarResultOrConstant(
-          builder_->makeFloatConstant(2.0f / 1024.0f), value_type),
-      SpirvSmearScalarResultOrConstant(
-          builder_->makeFloatConstant(1.0f / 1024.0f), value_type));
+      builder_->smearFloatConstant(2.0f / 1024.0f, value_type),
+      builder_->smearFloatConstant(1.0f / 1024.0f, value_type));
   spv::Id offset_1_or_0 = builder_->createTriOp(
       spv::OpSelect, value_type, is_piece_at_least_1,
-      SpirvSmearScalarResultOrConstant(builder_->makeFloatConstant(-64.0f),
-                                       value_type),
-      const_vector_0);
+      builder_->smearFloatConstant(-64.0f, value_type), const_vector_0);
 
   spv::Id is_piece_at_least_2 = builder_->createBinOp(
       spv::OpFOrdGreaterThanEqual, bool_type, gamma,
-      SpirvSmearScalarResultOrConstant(
-          builder_->makeFloatConstant(96.0f / 255.0f), value_type));
+      builder_->smearFloatConstant(96.0f / 255.0f, value_type));
   spv::Id scale =
       builder_->createTriOp(spv::OpSelect, value_type, is_piece_at_least_2,
                             scale_3_or_2, scale_1_or_0);
@@ -3232,64 +3780,54 @@ spv::Id SpirvShaderTranslator::PWLGammaToLinear(spv::Id gamma,
   return linear;
 }
 
-spv::Id SpirvShaderTranslator::LinearToPWLGamma(spv::Id linear,
-                                                bool linear_pre_saturated) {
+spv::Id SpirvShaderTranslator::LinearToPWLGamma(
+    SpirvBuilder* builder_, spv::Id linear, bool pre_saturated,
+    spv::Id ext_inst_glsl_std_450_) {
   spv::Id value_type = builder_->getTypeId(linear);
   assert_true(builder_->isFloatType(builder_->getScalarTypeId(value_type)));
   bool is_vector = builder_->isVectorType(value_type);
   assert_true(is_vector || builder_->isFloatType(value_type));
   int num_components = builder_->getNumTypeComponents(value_type);
   assert_true(num_components < 4);
-  spv::Id bool_type = type_bool_vectors_[num_components - 1];
+  spv::Id bool_type = is_vector ? builder_->makeVectorType(
+                                      builder_->makeBoolType(), num_components)
+                                : builder_->makeBoolType();
 
-  spv::Id const_vector_0 = const_float_vectors_0_[num_components - 1];
-  spv::Id const_vector_1 = SpirvSmearScalarResultOrConstant(
-      builder_->makeFloatConstant(1.0f), value_type);
+  spv::Id const_vector_0 = builder_->smearFloatConstant(0.0f, value_type);
 
-  if (!linear_pre_saturated) {
+  if (!pre_saturated) {
     // Saturate, flushing NaN to 0.
-    linear = builder_->createTriBuiltinCall(value_type, ext_inst_glsl_std_450_,
-                                            GLSLstd450NClamp, linear,
-                                            const_vector_0, const_vector_1);
+    linear = builder_->createTriBuiltinCall(
+        value_type, ext_inst_glsl_std_450_, GLSLstd450NClamp, linear,
+        const_vector_0, builder_->smearFloatConstant(1.0f, value_type));
   }
 
   spv::Id is_piece_at_least_3 = builder_->createBinOp(
       spv::OpFOrdGreaterThanEqual, bool_type, linear,
-      SpirvSmearScalarResultOrConstant(
-          builder_->makeFloatConstant(512.0f / 1023.0f), value_type));
+      builder_->smearFloatConstant(512.0f / 1023.0f, value_type));
   spv::Id scale_3_or_2 = builder_->createTriOp(
       spv::OpSelect, value_type, is_piece_at_least_3,
-      SpirvSmearScalarResultOrConstant(
-          builder_->makeFloatConstant(1023.0f / 8.0f), value_type),
-      SpirvSmearScalarResultOrConstant(
-          builder_->makeFloatConstant(1023.0f / 4.0f), value_type));
+      builder_->smearFloatConstant(1023.0f / 8.0f, value_type),
+      builder_->smearFloatConstant(1023.0f / 4.0f, value_type));
   spv::Id offset_3_or_2 = builder_->createTriOp(
       spv::OpSelect, value_type, is_piece_at_least_3,
-      SpirvSmearScalarResultOrConstant(
-          builder_->makeFloatConstant(128.0f / 255.0f), value_type),
-      SpirvSmearScalarResultOrConstant(
-          builder_->makeFloatConstant(64.0f / 255.0f), value_type));
+      builder_->smearFloatConstant(128.0f / 255.0f, value_type),
+      builder_->smearFloatConstant(64.0f / 255.0f, value_type));
 
   spv::Id is_piece_at_least_1 = builder_->createBinOp(
       spv::OpFOrdGreaterThanEqual, bool_type, linear,
-      SpirvSmearScalarResultOrConstant(
-          builder_->makeFloatConstant(64.0f / 1023.0f), value_type));
+      builder_->smearFloatConstant(64.0f / 1023.0f, value_type));
   spv::Id scale_1_or_0 = builder_->createTriOp(
       spv::OpSelect, value_type, is_piece_at_least_1,
-      SpirvSmearScalarResultOrConstant(
-          builder_->makeFloatConstant(1023.0f / 2.0f), value_type),
-      SpirvSmearScalarResultOrConstant(builder_->makeFloatConstant(1023.0f),
-                                       value_type));
+      builder_->smearFloatConstant(1023.0f / 2.0f, value_type),
+      builder_->smearFloatConstant(1023.0f, value_type));
   spv::Id offset_1_or_0 = builder_->createTriOp(
       spv::OpSelect, value_type, is_piece_at_least_1,
-      SpirvSmearScalarResultOrConstant(
-          builder_->makeFloatConstant(32.0f / 255.0f), value_type),
-      const_vector_0);
+      builder_->smearFloatConstant(32.0f / 255.0f, value_type), const_vector_0);
 
   spv::Id is_piece_at_least_2 = builder_->createBinOp(
       spv::OpFOrdGreaterThanEqual, bool_type, linear,
-      SpirvSmearScalarResultOrConstant(
-          builder_->makeFloatConstant(128.0f / 1023.0f), value_type));
+      builder_->smearFloatConstant(128.0f / 1023.0f, value_type));
   spv::Id scale =
       builder_->createTriOp(spv::OpSelect, value_type, is_piece_at_least_2,
                             scale_3_or_2, scale_1_or_0);

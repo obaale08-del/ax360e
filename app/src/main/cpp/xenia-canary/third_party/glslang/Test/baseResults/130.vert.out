@@ -1,9 +1,8 @@
 130.vert
-ERROR: 0:59: 'gl_InstanceID' : undeclared identifier 
-ERROR: 0:59: '=' :  cannot convert from ' temp float' to ' temp int'
+ERROR: 0:59: 'gl_InstanceID' : required extension not requested: GL_EXT_draw_instanced
 ERROR: 0:61: 'texelFetch' : no matching overloaded function found 
 ERROR: 0:61: 'assign' :  cannot convert from ' const float' to ' temp int'
-ERROR: 4 compilation errors.  No code generated.
+ERROR: 3 compilation errors.  No code generated.
 
 
 Shader version: 130
@@ -120,7 +119,11 @@ ERROR: node is still EOpNull!
 0:46          0.300000
 0:57  Function Definition: foo88( ( global void)
 0:57    Function Parameters: 
-0:?     Sequence
+0:59    Sequence
+0:59      Sequence
+0:59        move second child to first child ( temp int)
+0:59          'id' ( temp int)
+0:59          'gl_InstanceID' ( gl_InstanceId int InstanceId)
 0:61      'id' ( temp int)
 0:63      'gl_ClipVertex' ( gl_ClipVertex 4-component vector of float ClipVertex)
 0:64      'gl_Color' ( in 4-component vector of float Color)
@@ -263,7 +266,7 @@ ERROR: node is still EOpNull!
 0:45          'gl_VertexID' ( gl_VertexId int VertexId)
 0:46      move second child to first child ( temp float)
 0:46        direct index ( smooth temp float ClipDistance)
-0:46          'gl_ClipDistance' ( smooth out 2-element array of float ClipDistance)
+0:46          'gl_ClipDistance' ( smooth out unsized 2-element array of float ClipDistance)
 0:46          Constant:
 0:46            1 (const int)
 0:46        Constant:
@@ -278,8 +281,8 @@ ERROR: node is still EOpNull!
 0:?     'c3D' ( in 3-component vector of float)
 0:?     'c4D' ( smooth temp 4-component vector of float)
 0:?     'v4' ( uniform 4-component vector of float)
-0:?     'gl_ClipDistance' ( smooth out 2-element array of float ClipDistance)
-0:?     'gl_TexCoord' ( smooth out 1-element array of 4-component vector of float TexCoord)
+0:?     'gl_ClipDistance' ( smooth out unsized 2-element array of float ClipDistance)
+0:?     'gl_TexCoord' ( smooth out unsized 1-element array of 4-component vector of float TexCoord)
 0:?     'abcdef' ( global int)
 0:?     'qrstuv' ( global int)
 0:?     'gl_VertexID' ( gl_VertexId int VertexId)

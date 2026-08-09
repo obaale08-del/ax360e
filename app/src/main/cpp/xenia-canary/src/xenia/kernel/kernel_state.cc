@@ -64,6 +64,8 @@ KernelState::KernelState(Emulator* emulator)
   file_system_ = emulator->file_system();
   xam_state_ = std::make_unique<xam::XamState>(emulator, this);
   smc_ = std::make_unique<SystemManagementController>();
+  xconfig_ =
+      std::make_unique<XConfig>(emulator->storage_root() / "xconfig.settings");
 
   InitializeKernelGuestGlobals();
   kernel_version_ = KernelVersion(cvars::kernel_build_version);
@@ -117,6 +119,8 @@ uint32_t KernelState::title_id() const {
 
   return 0;
 }
+
+bool KernelState::is_title_open() const { return emulator_->is_title_open(); }
 
 const std::unique_ptr<xam::SpaInfo> KernelState::title_xdbf() const {
   return module_xdbf(executable_module_);
@@ -425,11 +429,6 @@ object_ref<XThread> KernelState::LaunchModule(object_ref<UserModule> module) {
 
   // Waits for a debugger client, if desired.
   emulator()->processor()->PreLaunch();
-
-  // Resume the thread now.
-  // If the debugger has requested a suspend this will just decrement the
-  // suspend count without resuming it until the debugger wants.
-  thread->Resume();
 
   return thread;
 }
@@ -1277,8 +1276,7 @@ XE_COLD
 uint32_t KernelState::CreateKeTimestampBundle() {
   auto crit = global_critical_region::Acquire();
 
-  uint32_t pKeTimeStampBundle =
-      memory_->SystemHeapAlloc(sizeof(X_TIME_STAMP_BUNDLE));
+  const uint32_t pKeTimeStampBundle = 0x80240EE0;
   X_TIME_STAMP_BUNDLE* lpKeTimeStampBundle =
       memory_->TranslateVirtual<X_TIME_STAMP_BUNDLE*>(pKeTimeStampBundle);
 
@@ -1451,15 +1449,18 @@ void KernelState::SetProcessTLSVars(X_KPROCESS* process, int num_slots,
   }
 
   // set remainder of bitset
-  if (((num_slots + 3) & 0x1C) != 0)
+  if (((num_slots + 3) & 0x1C) != 0) {
     process->tls_slot_bitmap[count_div32] = -1
                                             << (32 - ((num_slots + 3) & 0x1C));
+  }
 }
 void AllocateThread(PPCContext* context) {
   uint32_t thread_mem_size = static_cast<uint32_t>(context->r[3]);
   uint32_t a2 = static_cast<uint32_t>(context->r[4]);
   uint32_t a3 = static_cast<uint32_t>(context->r[5]);
-  if (thread_mem_size <= 0xFD8) thread_mem_size += 8;
+  if (thread_mem_size <= 0xFD8) {
+    thread_mem_size += 8;
+  }
   uint32_t result =
       xboxkrnl::xeAllocatePoolTypeWithTag(context, thread_mem_size, a2, a3);
   if (((unsigned short)result & 0xFFF) != 0) {
@@ -1529,15 +1530,17 @@ void KernelState::InitializeKernelGuestGlobals() {
   SetProcessTLSVars(system_process, 32, 0, 0);
 
   uint32_t oddobject_offset =
-      kernel_guest_globals_ + offsetof(KernelGuestGlobals, OddObj);
+      kernel_guest_globals_ +
+      offsetof(KernelGuestGlobals, XboxKernelDefaultObject);
 
   // init unknown object
 
-  block->OddObj.field0 = 0x1000000;
-  block->OddObj.field4 = 1;
-  block->OddObj.points_to_self =
-      oddobject_offset + offsetof(X_UNKNOWN_TYPE_REFED, points_to_self);
-  block->OddObj.points_to_prior = block->OddObj.points_to_self;
+  block->XboxKernelDefaultObject.type = DISPATCHER_AUTO_RESET_EVENT;
+  block->XboxKernelDefaultObject.signal_state = 1;
+  block->XboxKernelDefaultObject.wait_list.flink_ptr =
+      oddobject_offset + offsetof(X_DISPATCH_HEADER, wait_list.flink_ptr);
+  block->XboxKernelDefaultObject.wait_list.blink_ptr =
+      block->XboxKernelDefaultObject.wait_list.flink_ptr;
 
   // init thread object
   block->ExThreadObjectType.pool_tag = 0x65726854;
