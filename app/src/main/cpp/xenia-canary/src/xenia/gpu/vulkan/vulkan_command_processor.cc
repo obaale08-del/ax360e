@@ -5115,13 +5115,6 @@ void VulkanCommandProcessor::UpdateSystemConstantValues(
   dirty |= system_constants_.alpha_test_reference != rb_alpha_ref;
   system_constants_.alpha_test_reference = rb_alpha_ref;
 
-  // Alpha to coverage.
-  uint32_t alpha_to_mask = rb_colorcontrol.alpha_to_mask_enable
-                               ? (rb_colorcontrol.value >> 24) | (1 << 8)
-                               : 0;
-  dirty |= system_constants_.alpha_to_mask != alpha_to_mask;
-  system_constants_.alpha_to_mask = alpha_to_mask;
-
   // FSI ZPD counter.
   uint32_t zpd_fsi_counter_index = UINT32_MAX;
   if (edram_fragment_shader_interlock &&

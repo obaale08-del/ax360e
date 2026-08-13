@@ -298,7 +298,6 @@ void SpirvShaderTranslator::StartTranslation() {
        type_uint_},
       {"edram_depth_base_dwords_scaled",
        offsetof(SystemConstants, edram_depth_base_dwords_scaled), type_uint_},
-      {"alpha_to_mask", offsetof(SystemConstants, alpha_to_mask), type_uint_},
       {"zpd_fsi_counter_index",
        offsetof(SystemConstants, zpd_fsi_counter_index), type_uint_},
       {"color_exp_bias", offsetof(SystemConstants, color_exp_bias),
@@ -2327,14 +2326,8 @@ void SpirvShaderTranslator::StartFragmentShaderBeforeMain() {
   // FBO float24 in-PS conversion of the rasterizer's depth: reads
   // gl_FragCoord.z
   // - and must do so per-sample for MSAA antialiasing of intersections.
-  bool need_frag_coord =
-      edram_fragment_shader_interlock_ || param_gen_needed || IsSampleRate() ||
-      DSV_IsApplyingPolygonOffset() ||
-      (!edram_fragment_shader_interlock_ && !is_depth_only_fragment_shader_ &&
-       current_shader().writes_color_target(0) &&
-       !IsExecutionModeEarlyFragmentTests());
-  if (need_frag_coord) {
-    input_fragment_coordinates_ = builder_->createVariable(
+    if (edram_fragment_shader_interlock_ || param_gen_needed) {
+        input_fragment_coordinates_ = builder_->createVariable(
         spv::NoPrecision, spv::StorageClassInput, type_float4_, "gl_FragCoord");
     builder_->addDecoration(input_fragment_coordinates_, spv::DecorationBuiltIn,
                             static_cast<int>(spv::BuiltIn::FragCoord));
@@ -2425,19 +2418,6 @@ void SpirvShaderTranslator::StartFragmentShaderBeforeMain() {
 
   // Sample mask output for alpha-to-coverage.
   // Only needed for non-FSI mode. FSI uses main_fsi_sample_mask_ instead.
-  output_fragment_sample_mask_ = spv::NoResult;
-  if (!edram_fragment_shader_interlock_ && !is_depth_only_fragment_shader_) {
-    // gl_SampleMask is an array of int in SPIR-V.
-    spv::Id type_sample_mask_array =
-        builder_->makeArrayType(type_int_, builder_->makeUintConstant(1), 0);
-    output_fragment_sample_mask_ =
-        builder_->createVariable(spv::NoPrecision, spv::StorageClassOutput,
-                                 type_sample_mask_array, "gl_SampleMask");
-    builder_->addDecoration(output_fragment_sample_mask_,
-                            spv::DecorationBuiltIn,
-                            static_cast<int>(spv::BuiltIn::SampleMask));
-    main_interface_.push_back(output_fragment_sample_mask_);
-  }
 }
 
 void SpirvShaderTranslator::StartFragmentShaderInMain() {

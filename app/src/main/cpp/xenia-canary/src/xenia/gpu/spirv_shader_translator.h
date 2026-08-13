@@ -246,10 +246,6 @@ class SpirvShaderTranslator : public ShaderTranslator {
     float alpha_test_reference;
     uint32_t edram_32bpp_tile_pitch_dwords_scaled;
     uint32_t edram_depth_base_dwords_scaled;
-    // If alpha to mask is disabled, the entire alpha_to_mask value must be 0.
-    // If alpha to mask is enabled, bits 0:7 are sample offsets, and bit 8 must
-    // be 1.
-    uint32_t alpha_to_mask;
     // UINT32_MAX when the draw is outside an active ZPD segment, which is used
     // as a skip writing sentinel to the FSI counter buffer.
     uint32_t zpd_fsi_counter_index;
@@ -818,15 +814,6 @@ class SpirvShaderTranslator : public ShaderTranslator {
   // slot after final PS depth/stencil.
   void FSI_AddPassedMSAASamplesToZPD();
 
-  // Alpha to coverage helper - tests one sample.
-  // coverage_out is modified to include this sample if it passes.
-  void FSI_AlphaToMaskSample(bool initialize, uint32_t sample_index,
-                             float threshold_base, spv::Id threshold_offset,
-                             float threshold_offset_scale, spv::Id alpha,
-                             spv::Id& coverage_out);
-
-  // Alpha to coverage main function.
-  void FSI_AlphaToMask();
   // Returns the first and the second 32 bits as two uints.
   std::array<spv::Id, 2> FSI_ClampAndPackColor(spv::Id color_float4,
                                                spv::Id format_with_flags);
@@ -986,7 +973,6 @@ class SpirvShaderTranslator : public ShaderTranslator {
     kSystemConstantAlphaTestReference,
     kSystemConstantEdram32bppTilePitchDwordsScaled,
     kSystemConstantEdramDepthBaseDwordsScaled,
-    kSystemConstantAlphaToMask,
     kSystemConstantZpdFsiCounterIndex,
     kSystemConstantColorExpBias,
     kSystemConstantEdramPolyOffsetFrontScale,
