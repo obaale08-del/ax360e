@@ -23,8 +23,7 @@ namespace cpu {
 
 thread_local ThreadState* thread_state_ = nullptr;
 
-//或许应该应用于XE_ARCH_ARM64？
-#if XE_PLATFORM_AX360E
+#if !XE_PLATFORM_WIN32
         struct PackedContext {
             XE_MAYBE_UNUSED uint64_t backend_data[32];//分配256字节給CPU后端使用
             ppc::PPCContext ctx;
