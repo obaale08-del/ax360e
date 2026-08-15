@@ -10,14 +10,8 @@
 #include "xenia/base/platform.h"
 #include "xenia/kernel/kernel_flags.h"
 
-#if XE_PLATFORM_AX360E
-DEFINE_bool(headless, true,
-            "Don't display any UI, using defaults for prompts as needed.",
-            "UI");
-#else
 DEFINE_bool(headless, false,
             "Don't display any UI, using defaults for prompts as needed.",
             "UI");
-#endif
 DEFINE_bool(log_high_frequency_kernel_calls, false,
             "Log kernel calls with the kHighFrequency tag.", "Logging");

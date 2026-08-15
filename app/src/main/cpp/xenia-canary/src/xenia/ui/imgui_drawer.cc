@@ -63,6 +63,11 @@ ImGuiDrawer::ImGuiDrawer(xe::ui::Window* window, size_t z_order)
 }
 
 ImGuiDrawer::~ImGuiDrawer() {
+  // Make sure the guest gets the gamepad input back if the drawer is
+  // destroyed while dialogs are still open.
+  if (input_system_) {
+    input_system_->SetUiInputHijack(false);
+  }
   SetPresenter(nullptr);
   if (!dialogs_.empty()) {
     window_->RemoveInputListener(this);
@@ -98,6 +103,7 @@ void ImGuiDrawer::AddDialog(ImGuiDialog* dialog) {
     }
   }
   dialogs_.push_back(dialog);
+  UpdateGamepadHijackState();
 }
 
 void ImGuiDrawer::RemoveDialog(ImGuiDialog* dialog) {
@@ -114,6 +120,7 @@ void ImGuiDrawer::RemoveDialog(ImGuiDialog* dialog) {
     }
   }
   dialogs_.erase(it);
+  UpdateGamepadHijackState();
   DetachIfLastWindowRemoved();
 }
 
@@ -243,6 +250,8 @@ void ImGuiDrawer::LoadInputSystem(hid::InputSystem* input_system) {
   }
 
   input_system_ = input_system;
+  // If dialogs are already open at this point, hijack the gamepad now.
+  UpdateGamepadHijackState();
 }
 
 void ImGuiDrawer::SetGuideButtonAction(std::function<void(uint8_t)> func) {
@@ -956,7 +965,10 @@ void ImGuiDrawer::UpdateGamepads() {
   uint8_t controller_to_poke = XUserIndexNone;
   hid::X_INPUT_STATE gamepad_state;
   for (uint8_t i = 0; i < XUserMaxUserCount; i++) {
-    if (input_system_->GetState(i, 1, &gamepad_state) == X_ERROR_SUCCESS) {
+    // Use the hijack-bypassing getter - while dialogs are open, the regular
+    // GetState returns a neutral state to the guest and would give the UI
+    // empty input as well.
+    if (input_system_->GetStateUi(i, 1, &gamepad_state) == X_ERROR_SUCCESS) {
       if (gamepad_state.gamepad.buttons != 0) {
         controller_to_poke = i;
         break;
@@ -1040,6 +1052,17 @@ void ImGuiDrawer::UpdateGamepads() {
              -hid::X_INPUT_GAMEPAD_LEFT_THUMB_DEADZONE, -32768);
 #undef MAP_BUTTON
 #undef MAP_ANALOG
+}
+
+void ImGuiDrawer::UpdateGamepadHijackState() {
+  if (!input_system_) {
+    return;
+  }
+  const bool hijack_needed = !dialogs_.empty();
+  if (input_system_->IsUiInputHijacked() != hijack_needed) {
+    XELOGI("ImGui gamepad input hijack {}", hijack_needed ? "enabled" : "disabled");
+    input_system_->SetUiInputHijack(hijack_needed);
+  }
 }
 
 }  // namespace ui

@@ -114,7 +114,26 @@ X_RESULT InputSystem::GetCapabilities(uint32_t user_index, uint32_t flags,
 
 X_RESULT InputSystem::GetState(uint32_t user_index, uint32_t flags,
                                X_INPUT_STATE* out_state) {
+  return GetStateInternal(user_index, flags, out_state, false);
+}
+
+X_RESULT InputSystem::GetStateUi(uint32_t user_index, uint32_t flags,
+                                 X_INPUT_STATE* out_state) {
+  return GetStateInternal(user_index, flags, out_state, true);
+}
+
+X_RESULT InputSystem::GetStateInternal(uint32_t user_index, uint32_t flags,
+                                       X_INPUT_STATE* out_state,
+                                       bool bypass_ui_hijack) {
   SCOPE_profile_cpu_f("hid");
+
+  // While the on-screen UI (ImGui) owns the gamepad, report a neutral state
+  // to the guest so the UI input doesn't leak into the game.
+  if (!bypass_ui_hijack && (flags & X_INPUT_FLAG_GAMEPAD) &&
+      ui_input_hijacked_.load(std::memory_order_relaxed)) {
+    *out_state = {};
+    return X_ERROR_SUCCESS;
+  }
 
   std::vector<InputDriver*> filtered_drivers = FilterDrivers(flags);
   if (filtered_drivers.empty()) {
@@ -153,6 +172,13 @@ X_RESULT InputSystem::SetState(uint32_t user_index,
 X_RESULT InputSystem::GetKeystroke(uint32_t user_index, uint32_t flags,
                                    X_INPUT_KEYSTROKE* out_keystroke) {
   SCOPE_profile_cpu_f("hid");
+
+  // While the on-screen UI (ImGui) owns the gamepad, don't deliver any
+  // keystrokes to the guest.
+  if ((flags & X_INPUT_FLAG_GAMEPAD) &&
+      ui_input_hijacked_.load(std::memory_order_relaxed)) {
+    return X_ERROR_EMPTY;
+  }
 
   std::vector<InputDriver*> filtered_drivers = FilterDrivers(flags);
 

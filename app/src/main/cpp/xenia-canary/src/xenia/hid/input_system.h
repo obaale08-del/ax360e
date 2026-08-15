@@ -10,6 +10,7 @@
 #ifndef XENIA_HID_INPUT_SYSTEM_H_
 #define XENIA_HID_INPUT_SYSTEM_H_
 
+#include <atomic>
 #include <bitset>
 #include <memory>
 #include <vector>
@@ -47,6 +48,19 @@ class InputSystem {
   X_RESULT GetKeystroke(uint32_t user_index, uint32_t flags,
                         X_INPUT_KEYSTROKE* out_keystroke);
 
+  // When active, gamepad input reported to the guest (via GetState and
+  // GetKeystroke) is suppressed, so an on-screen UI (ImGui) can consume the
+  // gamepad exclusively without leaking input into the game.
+  void SetUiInputHijack(bool active) {
+    ui_input_hijacked_.store(active, std::memory_order_relaxed);
+  }
+  bool IsUiInputHijacked() const {
+    return ui_input_hijacked_.load(std::memory_order_relaxed);
+  }
+  // Reads the real gamepad state ignoring the UI hijack, for the UI itself.
+  X_RESULT GetStateUi(uint32_t user_index, uint32_t flags,
+                      X_INPUT_STATE* out_state);
+
   bool GetVibrationCvar();
   void ToggleVibration();
 
@@ -71,6 +85,9 @@ class InputSystem {
   void AdjustDeadzoneLevels(const uint8_t slot, X_INPUT_GAMEPAD* gamepad);
   X_INPUT_VIBRATION ModifyVibrationLevel(X_INPUT_VIBRATION* vibration);
 
+  X_RESULT GetStateInternal(uint32_t user_index, uint32_t flags,
+                            X_INPUT_STATE* out_state, bool bypass_ui_hijack);
+
   std::vector<InputDriver*> FilterDrivers(uint32_t flags);
 
   xe::ui::Window* window_ = nullptr;
@@ -84,6 +101,9 @@ class InputSystem {
   std::array<std::pair<joystick_value, joystick_value>, XUserMaxUserCount>
       controllers_max_joystick_value = {};
   uint32_t last_used_slot = 0;
+
+  // Whether the on-screen UI (ImGui) currently owns the gamepad input.
+  std::atomic<bool> ui_input_hijacked_ = false;
 
   xe_unlikely_mutex lock_;
 };

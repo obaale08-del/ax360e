@@ -60,13 +60,18 @@ namespace xe {
                 out_caps->type = 0x01;      // XINPUT_DEVTYPE_GAMEPAD
                 out_caps->sub_type = 0x01;  // XINPUT_DEVSUBTYPE_GAMEPAD
                 out_caps->flags = 0;
-                out_caps->gamepad.buttons = 0xFFFF;
+                // NOTE: must NOT report buttons == 0xFFFF with zero vibration
+                // motors - that exact combination is the "keyboard passed
+                // through as a gamepad" marker that ImGuiDrawer::UpdateGamepads
+                // skips, which would leave ImGui without gamepad navigation.
+                // 0xF3FF = all supported buttons except GUIDE.
+                out_caps->gamepad.buttons = 0xF3FF;
                 out_caps->gamepad.left_trigger = 0xFF;
                 out_caps->gamepad.right_trigger = 0xFF;
-                out_caps->gamepad.thumb_lx = (int16_t)0xFFFFu;
-                out_caps->gamepad.thumb_ly = (int16_t)0xFFFFu;
-                out_caps->gamepad.thumb_rx = (int16_t)0xFFFFu;
-                out_caps->gamepad.thumb_ry = (int16_t)0xFFFFu;
+                out_caps->gamepad.thumb_lx = 32767;
+                out_caps->gamepad.thumb_ly = 32767;
+                out_caps->gamepad.thumb_rx = 32767;
+                out_caps->gamepad.thumb_ry = 32767;
                 out_caps->vibration.left_motor_speed = 0;
                 out_caps->vibration.right_motor_speed = 0;
                 return X_ERROR_SUCCESS;

@@ -126,6 +126,9 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
   bool IsDrawingDialogs() const { return dialog_loop_next_index_ != SIZE_MAX; }
   void DetachIfLastWindowRemoved();
   void UpdateGamepads();
+  // Hijacks gamepad input from the guest while at least one dialog is shown,
+  // and hands it back to the guest when no dialogs are left.
+  void UpdateGamepadHijackState();
 
   std::optional<ImGuiKey> VirtualKeyToImGuiKey(VirtualKey vkey);
 
