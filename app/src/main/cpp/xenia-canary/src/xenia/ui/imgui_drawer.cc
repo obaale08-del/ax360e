@@ -16,6 +16,7 @@
 #include "third_party/imgui/imgui.h"
 #include "xenia/base/assert.h"
 #include "xenia/base/clock.h"
+#include "xenia/base/frame_stats.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/math.h"
 #include "xenia/ui/imgui_dialog.h"
@@ -45,6 +46,13 @@ DEFINE_path(
 
 DEFINE_uint32(font_size, 14, "Allows user to set custom font size.", "UI");
 UPDATE_from_uint32(font_size, 2024, 8, 31, 20, 12);
+
+DEFINE_bool(show_fps_overlay, false,
+            "Show a frame rate overlay drawn with ImGui.", "UI");
+DEFINE_int32(fps_overlay_position, 0,
+             "Position of the FPS overlay: 0 = top-left, 1 = top-right, "
+             "2 = bottom-left, 3 = bottom-right.",
+             "UI");
 
 namespace xe {
 namespace ui {
@@ -98,9 +106,7 @@ void ImGuiDrawer::AddDialog(ImGuiDialog* dialog) {
     // a dialog's Draw function, re-registering the ImGuiDrawer may result in
     // ImGui being drawn multiple times in the current frame.
     window_->AddInputListener(this, z_order_);
-    if (presenter_) {
-      presenter_->AddUIDrawerFromUIThread(this, z_order_);
-    }
+    AttachToPresenterIfNeeded();
   }
   dialogs_.push_back(dialog);
   UpdateGamepadHijackState();
@@ -132,9 +138,7 @@ void ImGuiDrawer::AddNotification(ImGuiNotification* dialog) {
     return;
   }
   if (notifications_.empty()) {
-    if (presenter_) {
-      presenter_->AddUIDrawerFromUIThread(this, z_order_);
-    }
+    AttachToPresenterIfNeeded();
   }
   notifications_.push_back(dialog);
 }
@@ -549,21 +553,44 @@ void ImGuiDrawer::SetupFontTexture() {
 }
 
 void ImGuiDrawer::SetPresenter(Presenter* new_presenter) {
-  if (presenter_) {
-    if (presenter_ == new_presenter) {
-      return;
-    }
-    if (!dialogs_.empty()) {
-      presenter_->RemoveUIDrawerFromUIThread(this);
-    }
-    ImGuiIO& io = GetIO();
+  if (presenter_ == new_presenter) {
+    return;
+  }
+  if (presenter_ && ui_drawer_attached_) {
+    presenter_->RemoveUIDrawerFromUIThread(this);
+    ui_drawer_attached_ = false;
   }
   presenter_ = new_presenter;
   if (presenter_) {
-    if (!dialogs_.empty()) {
-      presenter_->AddUIDrawerFromUIThread(this, z_order_);
-    }
+    AttachToPresenterIfNeeded();
   }
+}
+
+void ImGuiDrawer::AttachToPresenterIfNeeded() {
+  if (!presenter_ || ui_drawer_attached_) {
+    return;
+  }
+  if (dialogs_.empty() && notifications_.empty() &&
+      !cvars::show_fps_overlay) {
+    return;
+  }
+  presenter_->AddUIDrawerFromUIThread(this, z_order_);
+  ui_drawer_attached_ = true;
+}
+
+void ImGuiDrawer::DetachFromPresenterIfUnused() {
+  if (!ui_drawer_attached_) {
+    return;
+  }
+  // The FPS overlay keeps the drawer attached even without any dialogs or
+  // notifications.
+  if (!dialogs_.empty() || !notifications_.empty() || cvars::show_fps_overlay) {
+    return;
+  }
+  if (presenter_) {
+    presenter_->RemoveUIDrawerFromUIThread(this);
+  }
+  ui_drawer_attached_ = false;
 }
 
 void ImGuiDrawer::SetImmediateDrawer(ImmediateDrawer* new_immediate_drawer) {
@@ -604,7 +631,8 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
     return;
   }
 
-  if (dialogs_.empty() && notifications_.empty()) {
+  const bool draw_fps = cvars::show_fps_overlay;
+  if (dialogs_.empty() && notifications_.empty() && !draw_fps) {
     return;
   }
 
@@ -666,6 +694,10 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
     }
   }
 
+  if (draw_fps) {
+    DrawFpsOverlay(io);
+  }
+
   ImGui::Render();
   ImDrawData* draw_data = ImGui::GetDrawData();
   if (draw_data) {
@@ -681,7 +713,7 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
   // it now if needed.
   DetachIfLastWindowRemoved();
 
-  if (!dialogs_.empty() || !notifications_.empty()) {
+  if (!dialogs_.empty() || !notifications_.empty() || draw_fps) {
     // Repaint (and handle input) continuously if still active.
     presenter_->RequestUIPaintFromUIThread();
   }
@@ -921,15 +953,60 @@ void ImGuiDrawer::DetachIfLastWindowRemoved() {
   if (!dialogs_.empty() || !notifications_.empty() || IsDrawingDialogs()) {
     return;
   }
-  if (presenter_) {
-    presenter_->RemoveUIDrawerFromUIThread(this);
-  }
+  // The input listener is only active while dialogs are shown; the FPS
+  // overlay is display-only and must not consume any input.
   window_->RemoveInputListener(this);
   // Clear all input since no input will be received anymore, and when the
   // drawer becomes active again, it'd have an outdated input state otherwise
   // which will be persistent until new events actualize individual input
   // properties.
   ClearInput();
+  // Stays attached to the presenter if the FPS overlay is enabled.
+  DetachFromPresenterIfUnused();
+}
+
+void ImGuiDrawer::DrawFpsOverlay(ImGuiIO& io) {
+  // Guest frame stats recorded by the GPU command processor on each presented
+  // game frame - the real game frame rate, not the host UI repaint cadence.
+  float instant_ms, avg_ms, fps;
+  xe::GetFrameStats(instant_ms, avg_ms, fps);
+
+  constexpr float kPadding = 10.f;
+  ImVec2 pos;
+  ImVec2 pivot;
+  switch (cvars::fps_overlay_position) {
+    case 1:  // Top-right.
+      pos = ImVec2(io.DisplaySize.x - kPadding, kPadding);
+      pivot = ImVec2(1.f, 0.f);
+      break;
+    case 2:  // Bottom-left.
+      pos = ImVec2(kPadding, io.DisplaySize.y - kPadding);
+      pivot = ImVec2(0.f, 1.f);
+      break;
+    case 3:  // Bottom-right.
+      pos = ImVec2(io.DisplaySize.x - kPadding, io.DisplaySize.y - kPadding);
+      pivot = ImVec2(1.f, 1.f);
+      break;
+    default:  // Top-left.
+      pos = ImVec2(kPadding, kPadding);
+      pivot = ImVec2(0.f, 0.f);
+      break;
+  }
+  ImGui::SetNextWindowPos(pos, ImGuiCond_Always, pivot);
+  ImGui::SetNextWindowBgAlpha(0.4f);
+  if (ImGui::Begin("##fps_overlay", nullptr,
+                   ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
+                       ImGuiWindowFlags_AlwaysAutoResize |
+                       ImGuiWindowFlags_NoSavedSettings |
+                       ImGuiWindowFlags_NoNav |
+                       ImGuiWindowFlags_NoFocusOnAppearing)) {
+    if (fps > 0.f) {
+      ImGui::Text("FPS: %.1f (%.1f ms)", double(fps), double(avg_ms));
+    } else {
+      ImGui::Text("FPS: --");
+    }
+  }
+  ImGui::End();
 }
 
 void ImGuiDrawer::UpdateGamepads() {

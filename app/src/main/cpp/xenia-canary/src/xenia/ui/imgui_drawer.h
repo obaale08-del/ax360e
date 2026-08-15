@@ -129,6 +129,12 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
   // Hijacks gamepad input from the guest while at least one dialog is shown,
   // and hands it back to the guest when no dialogs are left.
   void UpdateGamepadHijackState();
+  // Presenter attachment helpers - the drawer stays attached while the FPS
+  // overlay is enabled even without any dialogs or notifications.
+  void AttachToPresenterIfNeeded();
+  void DetachFromPresenterIfUnused();
+  // Small non-interactive overlay showing the current frame rate.
+  void DrawFpsOverlay(ImGuiIO& io);
 
   std::optional<ImGuiKey> VirtualKeyToImGuiKey(VirtualKey vkey);
 
@@ -175,6 +181,10 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
   uint64_t last_frame_time_ticks_;
 
   bool are_notifications_enabled_ = true;
+
+  // Whether the drawer is currently registered with the presenter as a UI
+  // drawer (for dialogs, notifications, or the FPS overlay).
+  bool ui_drawer_attached_ = false;
 };
 
 }  // namespace ui
