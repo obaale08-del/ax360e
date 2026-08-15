@@ -30,6 +30,7 @@
 #include "xenia/gpu/vulkan/vulkan_graphics_system.h"
 #include "xenia/hid/nop/nop_hid.h"
 #include "xenia/kernel/xam/xam_module.h"
+#include "xenia/kernel/xam/xam_ui.h"
 #include "xenia/vfs/devices/host_path_device.h"
 
 #include "emulator.h"
@@ -616,6 +617,9 @@ XE_DEFINE_WINDOWED_APP(ax36e,EmulatorApp::create);
 
 namespace ae{
 
+    void show_soft_keyboard(const std::string& initial_text);
+    void hide_soft_keyboard();
+
     int boot_type;
 
     std::string boot_game_path;
@@ -677,6 +681,14 @@ namespace ae{
         g_windowed_app=xe::ui::GetWindowedAppCreator()(wnd_ctx);
         g_windowed_app_ref=dynamic_cast<EmulatorApp*>(g_windowed_app.get());
 
+        // Connect the ImGui keyboard input dialog to the Android soft keyboard.
+        xe::kernel::xam::soft_keyboard_show_hook=[](const std::string& initial){
+            ae::show_soft_keyboard(initial);
+        };
+        xe::kernel::xam::soft_keyboard_hide_hook=[](){
+            ae::hide_soft_keyboard();
+        };
+
         std::vector<char*> args;
         args.push_back(NULL);
         for(auto& i:g_launch_args){
@@ -703,6 +715,56 @@ namespace ae{
             xe::hid::android::AndroidInputDriver* driver=reinterpret_cast<xe::hid::android::AndroidInputDriver*>(g_windowed_app_ref->emu->input_system()->drivers_[0].get());
             driver->OnKey(key_code,pressed,value);
         }
+    }
+
+    // ---- Soft keyboard bridge (Java IME <-> ImGui KeyboardInputDialog) ----
+
+    // Cached at JNI_OnLoad time: FindClass on threads attached later (like the
+    // emulator UI thread) cannot see app classes through the default loader.
+    static jclass g_class_EmulatorActivity=nullptr;
+    static jmethodID g_mid_show_soft_input=nullptr;
+    static jmethodID g_mid_hide_soft_input=nullptr;
+
+    static JNIEnv* get_jni_env(){
+        JNIEnv* env=nullptr;
+        if(g_jvm->GetEnv(reinterpret_cast<void**>(&env),JNI_VERSION_1_6)==JNI_EDETACHED){
+            // The emulator UI thread is a native thread; keep it attached.
+            g_jvm->AttachCurrentThread(&env,nullptr);
+        }
+        return env;
+    }
+
+    void show_soft_keyboard(const std::string& initial_text){
+        if(!g_class_EmulatorActivity||!g_mid_show_soft_input) return;
+        JNIEnv* env=get_jni_env();
+        if(!env) return;
+        jstring js=env->NewStringUTF(initial_text.c_str());
+        env->CallStaticVoidMethod(g_class_EmulatorActivity,g_mid_show_soft_input,js);
+        env->DeleteLocalRef(js);
+    }
+
+    void hide_soft_keyboard(){
+        if(!g_class_EmulatorActivity||!g_mid_hide_soft_input) return;
+        JNIEnv* env=get_jni_env();
+        if(!env) return;
+        env->CallStaticVoidMethod(g_class_EmulatorActivity,g_mid_hide_soft_input);
+    }
+
+    void set_activity_jni_cache(jclass cls,jmethodID show,jmethodID hide){
+        g_class_EmulatorActivity=cls;
+        g_mid_show_soft_input=show;
+        g_mid_hide_soft_input=hide;
+    }
+
+    void ime_input(const char* text,bool done){
+        if(!g_windowed_app) return;
+        std::string s=text?text:"";
+        // The dialog lives on the emulator UI thread; marshal there and
+        // re-check the receiver, the dialog may close in the meantime.
+        g_windowed_app->app_context().CallInUIThread([s,done](){
+            auto* dialog=xe::kernel::xam::KeyboardInputDialog::GetActiveTextInput();
+            if(dialog) dialog->ApplyImeText(s,done);
+        });
     }
     void surface_changed(){
         if(!g_windowed_app) return;
@@ -733,4 +795,21 @@ namespace ae{
     void init(){
     }
 
+}
+
+// Caches EmulatorActivity JNI references while the app class loader is still
+// reachable (called from JNI_OnLoad); must run before any attached native
+// thread tries to call back into the activity.
+int cache_ax360e_activity_jni(JNIEnv* env){
+    jclass cls=env->FindClass("aenu/ax360e/EmulatorActivity");
+    if(!cls) return JNI_ERR;
+    jclass gcls=(jclass)env->NewGlobalRef(cls);
+    jmethodID mid_show=env->GetStaticMethodID(gcls,"show_soft_input","(Ljava/lang/String;)V");
+    jmethodID mid_hide=env->GetStaticMethodID(gcls,"hide_soft_input","()V");
+    if(!mid_show||!mid_hide){
+        env->DeleteGlobalRef(gcls);
+        return JNI_ERR;
+    }
+    ae::set_activity_jni_cache(gcls,mid_show,mid_hide);
+    return JNI_OK;
 }

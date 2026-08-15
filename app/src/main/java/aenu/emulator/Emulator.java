@@ -128,6 +128,10 @@ public class Emulator {
 
     public native void key_event(int key_code,boolean pressed,int value);
 
+    // Forward text from the Android soft keyboard to the emulator UI
+    // (KeyboardInputDialog). done=true commits the text (acts like OK).
+    public native void ime_input(String text,boolean done);
+
     public native void quit();
 
     public native boolean is_running();

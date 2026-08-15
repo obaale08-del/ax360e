@@ -13,6 +13,9 @@ import android.os.ParcelFileDescriptor;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.preference.PreferenceManager;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
 import android.util.Log;
 import android.util.SparseIntArray;
 import android.view.InputDevice;
@@ -22,6 +25,12 @@ import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
@@ -37,6 +46,94 @@ public class EmulatorActivity extends Activity implements SurfaceHolder.Callback
     public static final String EXTRA_GAME_URI="game_uri";
     public static final String EXTRA_CONFIG_PATH="config_path";
     static SurfaceView sf=null;
+    // Soft keyboard support for the ImGui keyboard input dialog.
+    static EmulatorActivity g_activity=null;
+    EditText soft_input_view=null;
+    InputMethodManager imm=null;
+
+    public static void show_soft_input(final String initial){
+        final EmulatorActivity act=g_activity;
+        if(act==null||act.soft_input_view==null) return;
+        act.runOnUiThread(new Runnable(){
+            @Override
+            public void run(){
+                act.soft_input_view.setText(initial==null?"":initial);
+                act.soft_input_view.setSelection(act.soft_input_view.getText().length());
+                act.soft_input_view.requestFocus();
+                if(act.imm!=null)
+                    act.imm.showSoftInput(act.soft_input_view,InputMethodManager.SHOW_IMPLICIT);
+            }
+        });
+    }
+
+    public static void hide_soft_input(){
+        final EmulatorActivity act=g_activity;
+        if(act==null||act.soft_input_view==null) return;
+        act.runOnUiThread(new Runnable(){
+            @Override
+            public void run(){
+                if(act.imm!=null)
+                    act.imm.hideSoftInputFromWindow(act.soft_input_view.getWindowToken(),0);
+                act.soft_input_view.clearFocus();
+                // Give gamepad key events back to the emulator surface.
+                if(sf!=null) sf.requestFocus();
+            }
+        });
+    }
+
+    void setup_soft_input(){
+        g_activity=this;
+        imm=(InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
+        soft_input_view=new EditText(this);
+        // Invisible 1x1 widget used only to host the IME connection.
+        soft_input_view.setLayoutParams(new FrameLayout.LayoutParams(1,1));
+        soft_input_view.setAlpha(0f);
+        soft_input_view.setBackgroundColor(0);
+        soft_input_view.setInputType(InputType.TYPE_CLASS_TEXT);
+        soft_input_view.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        soft_input_view.addTextChangedListener(new TextWatcher(){
+            @Override public void beforeTextChanged(CharSequence s,int a,int b,int c){}
+            @Override public void onTextChanged(CharSequence s,int a,int b,int c){}
+            @Override public void afterTextChanged(Editable s){
+                // Live-sync the typed text into the ImGui dialog buffer.
+                Emulator.get.ime_input(s.toString(),false);
+            }
+        });
+        soft_input_view.setOnEditorActionListener(new TextView.OnEditorActionListener(){
+            @Override
+            public boolean onEditorAction(TextView v,int actionId,KeyEvent event){
+                if(actionId==EditorInfo.IME_ACTION_DONE||actionId==EditorInfo.IME_NULL){
+                    Emulator.get.ime_input(v.getText().toString(),true);
+                    hide_soft_input();
+                    return true;
+                }
+                return false;
+            }
+        });
+        // After the IME has been dismissed (e.g. via back), hand mapped
+        // gamepad keys back to the emulator instead of eating them here.
+        soft_input_view.setOnKeyListener(new View.OnKeyListener(){
+            @Override
+            public boolean onKey(View v,int keyCode,KeyEvent event){
+                if(imm!=null&&imm.isAcceptingText()) return false;
+                int gameKey=keysMap.get(keyCode,KEY_NO_MAPPED);
+                if(gameKey==KEY_NO_MAPPED) return false;
+                if(event.getAction()==KeyEvent.ACTION_DOWN){
+                    if(event.getRepeatCount()==0)
+                        Emulator.get.key_event(gameKey,true,VirtualControl.KEY_VALUE_UNUSED);
+                    if(sf!=null) sf.requestFocus();
+                    return true;
+                }else if(event.getAction()==KeyEvent.ACTION_UP){
+                    Emulator.get.key_event(gameKey,false,VirtualControl.KEY_VALUE_UNUSED);
+                    if(sf!=null) sf.requestFocus();
+                    return true;
+                }
+                return false;
+            }
+        });
+        ViewGroup root=(ViewGroup)sf.getParent();
+        root.addView(soft_input_view);
+    }
     private SparseIntArray keysMap = new SparseIntArray();
     private Vibrator vibrator=null;
     private VibrationEffect vibrationEffect=null;
@@ -79,6 +176,8 @@ public class EmulatorActivity extends Activity implements SurfaceHolder.Callback
         sf.setFocusableInTouchMode(true);
         sf.requestFocus();
         sf.setOnGenericMotionListener(this);
+
+        setup_soft_input();
 
         load_key_map_and_vibrator();
     }
@@ -187,6 +286,7 @@ public class EmulatorActivity extends Activity implements SurfaceHolder.Callback
     protected void onDestroy()
     {
         super.onDestroy();
+        if(g_activity==this) g_activity=null;
         System.exit(0);
     }
 

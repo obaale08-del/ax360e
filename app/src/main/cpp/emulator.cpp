@@ -10,6 +10,7 @@
 
 namespace ae{
     extern std::unique_ptr<xe::ui::WindowedApp> g_windowed_app;
+    void ime_input(const char* text,bool done);
 }
 
 #define LOG_TAG "Emulator_Config"
@@ -607,6 +608,13 @@ static void j_key_event(JNIEnv* env,jobject self,jint key_code,jboolean pressed,
     ae::key_event(key_code,pressed,value);
 }
 
+static void j_ime_input(JNIEnv* env,jobject self,jstring text,jboolean done){
+    const char* text_cstr=text?env->GetStringUTFChars(text,nullptr):"";
+    ae::ime_input(text_cstr,done);
+    if(text)
+        env->ReleaseStringUTFChars(text,text_cstr);
+}
+
 static void j_pause(JNIEnv* env,jobject self){
     ae::pause();
 }
@@ -634,6 +642,7 @@ int register_Emulator(JNIEnv* env){
             { "setup_surface", "(Landroid/view/Surface;)V", (void *) j_setup_surface },
             { "boot", "()V", (void *) j_boot },
             { "key_event", "(IZI)V", (void *) j_key_event },
+            { "ime_input", "(Ljava/lang/String;Z)V", (void *) j_ime_input },
             { "quit", "()V", (void *) j_quit },
             { "is_running", "()Z", (void *) j_is_running },
             { "is_paused", "()Z", (void *) j_is_paused },

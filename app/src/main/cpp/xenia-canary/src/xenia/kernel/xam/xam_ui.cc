@@ -8,6 +8,10 @@
  */
 
 #include "xenia/kernel/xam/xam_ui.h"
+
+// For ImGuiContext internals (NavId/ActiveId) used by KeyboardInputDialog.
+#include "third_party/imgui/imgui_internal.h"
+
 #include "xenia/app/emulator_window.h"
 #include "xenia/base/png_utils.h"
 #include "xenia/base/system.h"
@@ -39,6 +43,14 @@ constexpr std::chrono::milliseconds kUIDelayMillis(200);
 namespace xe {
 namespace kernel {
 namespace xam {
+
+#if XE_PLATFORM_AX360E
+// App-layer soft keyboard hooks (installed on Android), see xam_ui.h.
+std::function<void(const std::string&)> soft_keyboard_show_hook = nullptr;
+std::function<void()> soft_keyboard_hide_hook = nullptr;
+
+KeyboardInputDialog* KeyboardInputDialog::active_text_input_ = nullptr;
+#endif
 // TODO(gibbed): This is all one giant WIP that seems to work better than the
 // previous immediate synchronous completion of dialogs.
 //
@@ -275,6 +287,17 @@ void KeyboardInputDialog::OnDraw(ImGuiIO& io) {
     has_opened_ = true;
     first_draw = true;
   }
+
+  ImGuiContext& g = *ImGui::GetCurrentContext();
+  // A/B presses targeting the input field are detected through the previous
+  // frame's focus: ImGui already consumed the press inside NewFrame (B clears
+  // the focus, A activates the widget) before this code runs.
+  const bool input_was_focused =
+      input_item_id_ != 0 && prev_nav_id_ == input_item_id_;
+  const bool a_pressed = ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false);
+  const bool b_pressed =
+      ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false);
+
   if (ImGui::BeginPopupModal(title_.c_str(), nullptr,
                              ImGuiWindowFlags_AlwaysAutoResize)) {
     if (description_.size()) {
@@ -284,9 +307,17 @@ void KeyboardInputDialog::OnDraw(ImGuiIO& io) {
       ImGui::SetKeyboardFocusHere();
     }
     ImGui::PushID("input_text");
+    ImGuiInputTextFlags input_flags = ImGuiInputTextFlags_EnterReturnsTrue;
+    if (input_was_focused && a_pressed) {
+      // A opens the platform soft keyboard instead of ImGui's built-in edit
+      // mode (which is unusable without a physical keyboard); keep the
+      // widget read-only so the activation has no effect.
+      input_flags |= ImGuiInputTextFlags_ReadOnly;
+    }
     bool input_submitted =
         ImGui::InputText("##body", text_buffer_.data(), text_buffer_.size(),
-                         ImGuiInputTextFlags_EnterReturnsTrue);
+                         input_flags);
+    input_item_id_ = ImGui::GetItemID();
     // Context menu for paste functionality
     if (ImGui::BeginPopupContextItem("input_context_menu")) {
       if (ImGui::MenuItem("Paste")) {
@@ -299,7 +330,39 @@ void KeyboardInputDialog::OnDraw(ImGuiIO& io) {
       ImGui::EndPopup();
     }
     ImGui::PopID();
-    if (input_submitted) {
+
+    bool handled_by_gamepad = false;
+    if (input_was_focused) {
+      if (b_pressed) {
+        // B while the input field is focused cancels the dialog.
+        cancelled_ = true;
+        ImGui::CloseCurrentPopup();
+        Close();
+        handled_by_gamepad = true;
+      } else if (a_pressed) {
+        // A while the input field is focused opens the platform soft
+        // keyboard. Cancel ImGui's own activation of the widget.
+        if (g.ActiveId == input_item_id_) {
+          ImGui::ClearActiveID();
+        }
+#if XE_PLATFORM_AX360E
+        active_text_input_ = this;
+        if (soft_keyboard_show_hook) {
+          soft_keyboard_show_hook(std::string(text_buffer_.data()));
+        }
+#endif
+        handled_by_gamepad = true;
+      }
+    }
+
+    if (!handled_by_gamepad && ime_commit_pending_) {
+      // The platform IME committed its text - act like the OK button.
+      ime_commit_pending_ = false;
+      text_ = std::string(text_buffer_.data());
+      cancelled_ = false;
+      ImGui::CloseCurrentPopup();
+      Close();
+    } else if (!handled_by_gamepad && input_submitted) {
       text_ = std::string(text_buffer_.data(), text_buffer_.size());
       cancelled_ = false;
       ImGui::CloseCurrentPopup();
@@ -323,8 +386,40 @@ void KeyboardInputDialog::OnDraw(ImGuiIO& io) {
   } else {
     Close();
   }
+  prev_nav_id_ = g.NavId;
 }
 
+KeyboardInputDialog::~KeyboardInputDialog() {
+#if XE_PLATFORM_AX360E
+  if (active_text_input_ == this) {
+    active_text_input_ = nullptr;
+    if (soft_keyboard_hide_hook) {
+      soft_keyboard_hide_hook();
+    }
+  }
+#endif
+}
+
+#if XE_PLATFORM_AX360E
+void KeyboardInputDialog::OnClose() {
+  if (active_text_input_ == this) {
+    active_text_input_ = nullptr;
+    if (soft_keyboard_hide_hook) {
+      soft_keyboard_hide_hook();
+    }
+  }
+  XamDialog::OnClose();
+}
+
+void KeyboardInputDialog::ApplyImeText(const std::string& text, bool commit) {
+  xe::string_util::copy_truncating(text_buffer_.data(), text,
+                                   text_buffer_.size());
+  if (commit) {
+    // Applied on the next OnDraw, where the popup context is current.
+    ime_commit_pending_ = true;
+  }
+}
+#endif
 static dword_result_t XamShowMessageBoxUi(
     dword_t user_index, lpu16string_t title_ptr, lpu16string_t text_ptr,
     dword_t button_count, lpdword_t button_ptrs, dword_t active_button,
