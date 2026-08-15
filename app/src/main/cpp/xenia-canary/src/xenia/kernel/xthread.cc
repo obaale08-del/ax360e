@@ -429,6 +429,24 @@ X_STATUS XThread::Create() {
 
   params.stack_size = 16_MiB;  // Allocate a big host stack.
   thread_ = xe::threading::Thread::Create(params, [this]() {
+#if XE_PLATFORM_AX360E
+    // Keep the XThread object alive until this host thread is completely
+    // done. On POSIX platforms XThread::Exit() releases the last handle and
+    // then still needs to run xe::threading::Thread::Exit() (self-terminate,
+    // which locks members of the threading wrapper). Without this extra
+    // reference the object could be deleted right after ReleaseHandle(),
+    // causing "pthread_mutex_lock called on a destroyed mutex".
+    // The reference is dropped when leaving this lambda, including stack
+    // unwinding triggered by pthread_exit() on thread termination.
+    // Not needed on Windows: Thread::Exit() is ExitThread() there and never
+    // touches the object after ReleaseHandle().
+    struct HostThreadLifetimeGuard {
+      XThread* t;
+      explicit HostThreadLifetimeGuard(XThread* t) : t(t) { t->Retain(); }
+      ~HostThreadLifetimeGuard() { t->Release(); }
+    } lifetime_guard(this);
+#endif
+
     // Set thread ID override. This is used by logging.
     xe::threading::set_current_thread_id(handle());
 
@@ -523,6 +541,11 @@ X_STATUS XThread::Exit(int exit_code) {
   xe::Profiler::ThreadExit();
 
   running_ = false;
+#if XE_PLATFORM_AX360E
+  // Balance the HostThreadLifetimeGuard reference taken in the host thread
+  // routine, keeping the object alive through the Thread::Exit() call below.
+  Retain();
+#endif
   ReleaseHandle();
 
   // NOTE: this does not return!
@@ -543,6 +566,11 @@ X_STATUS XThread::Terminate(int exit_code) {
 
   running_ = false;
   if (XThread::IsInThread(this)) {
+#if XE_PLATFORM_AX360E
+    // Balance the HostThreadLifetimeGuard reference taken in the host thread
+    // routine, keeping the object alive through the Thread::Exit() call.
+    Retain();
+#endif
     ReleaseHandle();
     xe::threading::Thread::Exit(exit_code);
   } else {
