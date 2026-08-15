@@ -43,6 +43,10 @@ class GameAchievementsUI final : public XamDialog {
 
  private:
   bool show_locked_info_ = false;
+  // The ImGui navigation focus ID (g.NavId) from the previous frame; used to
+  // tell "B pressed while already unfocused" (close) apart from "B press that
+  // just exited the focus" (don't close). NavId == 0 means nothing focused.
+  uint32_t prev_nav_id_ = 0xFFFFFFFF;
 
   uint64_t window_id_;
   const ImVec2 drawing_position_ = {};
