@@ -3,6 +3,7 @@ package aenu.ax360e;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.res.Configuration;
 import android.content.res.AssetManager;
 import android.database.Cursor;
 import android.graphics.Bitmap;
@@ -31,6 +32,20 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 public class Utils {
+    /*
+     * targetSdk>=35 强制边到边(edge-to-edge)显示,状态栏/导航栏透明,
+     * 必须显式设置系统栏图标颜色,否则图标可能与窗口背景同色而不可见:
+     * 亮色主题(白色背景) -> 深色图标;暗色主题(深色背景) -> 浅色图标。
+     */
+    public static void setup_system_bars_appearance(Activity a){
+        Window w=a.getWindow();
+        WindowInsetsControllerCompat wic=WindowCompat.getInsetsController(w,w.getDecorView());
+        boolean is_night=(a.getResources().getConfiguration().uiMode
+                &Configuration.UI_MODE_NIGHT_MASK)==Configuration.UI_MODE_NIGHT_YES;
+        wic.setAppearanceLightStatusBars(!is_night);
+        wic.setAppearanceLightNavigationBars(!is_night);
+    }
+
     public static void enable_fullscreen(Window w){
         WindowCompat.setDecorFitsSystemWindows(w,false);
         WindowInsetsControllerCompat wic=WindowCompat.getInsetsController(w,w.getDecorView());

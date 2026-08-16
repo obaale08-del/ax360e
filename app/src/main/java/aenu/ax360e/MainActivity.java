@@ -200,6 +200,8 @@ _on_create();
         supportRequestWindowFeature(Window.FEATURE_NO_TITLE);
         super.onCreate(savedInstanceState);
 
+        Utils.setup_system_bars_appearance(this);
+
         if(!Application.device_support_vulkan()){
             show_device_unsupport_vulkan_dialog();
             return;
