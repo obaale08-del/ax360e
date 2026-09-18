@@ -1,0 +1,7 @@
+# Excluir el núcleo privado del repositorio público Open-Core
+core/video_core.sh
+core/profiler.sh
+
+# Mantener solo el wrapper público y la documentación
+!client/
+!docs/
