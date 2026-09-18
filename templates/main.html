@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simbio Engine Pro v4.5</title>
+    <style>
+        :root {
+            --panel-bg: rgba(6, 16, 28, 0.72);
+            --panel-sec: rgba(15, 28, 44, 0.60);
+            --border-main: rgba(190, 220, 255, 0.3);
+            --border-glow: rgba(140, 190, 255, 0.6);
+            --text-main: #F5F8FF;
+            --text-secondary: #B8C8D9;
+            --text-small: #91A5BA;
+            --tech-blue: #38BDF8;
+            --intense-blue: #0072FF;
+            --luminous-cyan: #00CFFF;
+            --purple: #C43FFF;
+            --status-green: #00E58A;
+            --time-gold: #FFC928;
+            --border-radius-main: 24px;
+            --border-radius-card: 16px;
+            --blur-panels: 16px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 14px;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        .dynamic-background {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: -2;
+            background-size: cover; background-position: center; transition: background-image 1.5s ease-in-out;
+        }
+
+        .bg-overlay {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: -1;
+            background: linear-gradient(rgba(3, 10, 20, 0.4), rgba(3, 10, 20, 0.75));
+            backdrop-filter: brightness(0.85);
+        }
+
+        .main-container {
+            width: 100%; max-width: 620px; background: var(--panel-bg);
+            backdrop-filter: blur(var(--blur-panels)); -webkit-backdrop-filter: blur(var(--blur-panels));
+            border: 1px solid var(--border-glow); border-radius: var(--border-radius-main);
+            box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7), inset 0 0 40px rgba(70, 160, 255, 0.05);
+            padding: 26px; position: relative;
+        }
+
+        .header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding-bottom: 20px; margin-bottom: 20px; border-bottom: 1px solid rgba(130, 190, 255, 0.25); gap: 12px;
+        }
+        .logo-area { display: flex; align-items: center; gap: 14px; min-width: 0; }
+        .logo-icon {
+            width: 52px; height: 52px; min-width: 52px;
+            background: linear-gradient(135deg, #00C6FF, #0072FF, #7928CA);
+            border-radius: 14px; display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 0 20px rgba(0, 198, 255, 0.4);
+        }
+        .logo-icon svg { width: 28px; height: 28px; fill: white; }
+        .brand-title { font-size: 22px; font-weight: 700; color: var(--text-main); }
+        .brand-subtitle { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+
+        .license-badge {
+            background: rgba(0, 229, 138, 0.12); border: 1px solid rgba(0, 229, 138, 0.4);
+            color: var(--status-green); padding: 6px 14px; border-radius: 20px; font-size: 11px; font-weight: 600;
+            display: flex; align-items: center; gap: 6px; white-space: nowrap;
+        }
+        .license-badge::before {
+            content: ''; width: 7px; height: 7px; background-color: var(--status-green); border-radius: 50%; box-shadow: 0 0 10px var(--status-green);
+        }
+
+        .file-input-wrapper {
+            background: var(--panel-sec); border: 1px dashed rgba(56, 189, 248, 0.5);
+            padding: 14px; border-radius: var(--border-radius-card); margin-bottom: 16px; text-align: center; cursor: pointer;
+        }
+        .file-input-wrapper input[type="file"] { display: none; }
+        .file-input-label { color: var(--tech-blue); font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px; }
+
+        .grid-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 14px; }
+        .stat-card {
+            background: var(--panel-sec); border: 1px solid var(--border-main);
+            border-radius: var(--border-radius-card); padding: 14px 16px;
+        }
+        .stat-card.full-width { grid-column: span 2; border: 1px solid rgba(255, 201, 40, 0.5); background: rgba(255, 201, 40, 0.04); }
+        .stat-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+        .stat-header svg { width: 20px; height: 20px; fill: var(--tech-blue); }
+        .stat-card.full-width .stat-header svg { fill: var(--time-gold); }
+        .stat-title { font-size: 11px; color: var(--text-small); text-transform: uppercase; font-weight: 600; }
+        .stat-value { font-size: 19px; font-weight: 700; color: var(--text-main); margin-top: 2px; }
+        
+        .badge-saving {
+            display: inline-block; background: rgba(0, 229, 255, 0.12); border: 1px solid rgba(0, 229, 255, 0.3);
+            color: var(--luminous-cyan); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; margin-top: 6px;
+        }
+
+        .download-section {
+            display: none; background: rgba(0, 229, 138, 0.08); border: 1px solid rgba(0, 229, 138, 0.4);
+            border-radius: var(--border-radius-card); padding: 16px; margin-bottom: 16px; text-align: center;
+        }
+        .download-title { font-size: 14px; font-weight: 700; color: var(--status-green); margin-bottom: 10px; }
+        .download-btn {
+            display: inline-block; background: var(--status-green); color: #031014; padding: 8px 16px;
+            border-radius: 20px; font-weight: 700; font-size: 12px; text-decoration: none; margin: 4px;
+            box-shadow: 0 0 15px rgba(0, 229, 138, 0.4);
+        }
+
+        .optimize-button {
+            display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 62px;
+            border: 1px solid var(--luminous-cyan); border-radius: 40px;
+            background: linear-gradient(90deg, var(--luminous-cyan), var(--intense-blue), var(--purple));
+            color: white; font-size: 18px; font-weight: 700; box-shadow: 0 0 25px rgba(0, 190, 255, 0.4); cursor: pointer;
+        }
+
+        .footer-note {
+            display: flex; justify-content: space-between; align-items: center; font-size: 11px;
+            color: var(--text-small); margin-top: 16px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+    </style>
+</head>
+<body>
+    <div class="dynamic-background" id="bgSlider"></div>
+    <div class="bg-overlay"></div>
+
+    <div class="main-container">
+        <div class="header">
+            <div class="logo-area">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                </div>
+                <div class="logo-text-wrapper">
+                    <div class="brand-title">Simbio Engine Pro</div>
+                    <div class="brand-subtitle">La información, en su forma más eficiente.</div>
+                </div>
+            </div>
+            <div class="license-badge">Licencia: OK</div>
+        </div>
+
+        <div class="download-section" id="downloadSection">
+            <div class="download-title">✨ ¡Archivos optimizados con éxito!</div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">Toca para descargar a tu dispositivo:</div>
+            <div id="downloadLinksContainer"></div>
+        </div>
+
+        <form id="uploadForm">
+            <div class="file-input-wrapper" onclick="document.getElementById('archivo').click()">
+                <span class="file-input-label" id="fileLabel">
+                    📁 Seleccionar archivos multimedia
+                </span>
+                <input type="file" id="archivo" name="archivo" multiple required>
+            </div>
+
+            <div class="grid-stats">
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <svg viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                        <span class="stat-title">Archivos</span>
+                    </div>
+                    <div class="stat-value" id="statFiles">0 archivos</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <svg viewBox="0 0 24 24"><path d="M12 3C7.03 3 3 4.79 3 7s4.03 4 9 4 9-1.79 9-4-4.03-4-9-4zM3 9v6c0 2.21 4.03 4 9 4s9-1.79 9-4V9c-2.12 1.3-5.52 2-9 2s-6.88-.7-9-2zm0 8v4c0 2.21 4.03 4 9 4s9-1.79 9-4v-4c-2.12 1.3-5.52 2-9 2s-6.88-.7-9-2 z"/></svg>
+                        <span class="stat-title">Original</span>
+                    </div>
+                    <div class="stat-value" id="statOriginal">0.0 MB</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <svg viewBox="0 0 24 24"><path d="M17 8C8 10 5.9 16.17 3.82 21.34l1.89.66.95-2.3c.48.17.98.3 1.5.3 5 0 8.5-4.5 9.5-8.5C18.42 10.9 17.8 9.38 17 8z"/></svg>
+                        <span class="stat-title">Symbio</span>
+                    </div>
+                    <div class="stat-value" id="statSymbio">0.0 MB</div>
+                    <div class="badge-saving">-90.0%</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                        <span class="stat-title">Envío</span>
+                    </div>
+                    <div class="stat-value" id="statEnvio">0.0 MB</div>
+                    <div class="badge-saving">-60.0%</div>
+                </div>
+
+                <div class="stat-card full-width">
+                    <div class="stat-header">
+                        <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67 z"/></svg>
+                        <span class="stat-title">Tiempo estimado</span>
+                    </div>
+                    <div class="stat-value" id="statTime" style="color: var(--time-gold);">0 segundos</div>
+                </div>
+            </div>
+
+            <button type="submit" class="optimize-button" id="btnSubmit">
+                ⚡ Comprimir y Optimizar →
+            </button>
+        </form>
+
+        <div class="footer-note">
+            <span>Simbio Engine Pro v4.5</span>
+            <span>🔒 Local & Seguro</span>
+        </div>
+    </div>
+
+    <script>
+        const backgroundImages = [
+            'https://picsum.photos/id/1018/1920/1080',
+            'https://picsum.photos/id/1043/1920/1080',
+            'https://picsum.photos/id/1039/1920/1080',
+            'https://picsum.photos/id/1050/1920/1080'
+        ];
+
+        let currentBgIndex = 0;
+        const bgElement = document.getElementById('bgSlider');
+
+        function changeBackground() {
+            bgElement.style.backgroundImage = `url('${backgroundImages[currentBgIndex]}')`;
+            currentBgIndex = (currentBgIndex + 1) % backgroundImages.length;
+        }
+
+        changeBackground();
+        setInterval(changeBackground, 10000);
+
+        const fileInput = document.getElementById('archivo');
+        const fileLabel = document.getElementById('fileLabel');
+        const statFiles = document.getElementById('statFiles');
+        const statOriginal = document.getElementById('statOriginal');
+        const statSymbio = document.getElementById('statSymbio');
+        const statEnvio = document.getElementById('statEnvio');
+        const statTime = document.getElementById('statTime');
+        const uploadForm = document.getElementById('uploadForm');
+        const btnSubmit = document.getElementById('btnSubmit');
+        const downloadSection = document.getElementById('downloadSection');
+        const downloadLinksContainer = document.getElementById('downloadLinksContainer');
+
+        let estimatedSeconds = 3;
+
+        fileInput.addEventListener('change', function() {
+            if (this.files.length > 0) {
+                let totalBytes = 0;
+                for (let i = 0; i < this.files.length; i++) {
+                    totalBytes += this.files[i].size;
+                }
+                let totalMB = (totalBytes / (1024 * 1024)).toFixed(1);
+                let symbioMB = (totalMB * 0.1).toFixed(1);
+                let envioMB = (totalMB * 0.4).toFixed(1);
+                estimatedSeconds = Math.max(3, Math.round(totalMB * 0.15));
+
+                fileLabel.innerHTML = `📁 ${this.files.length} archivo(s) seleccionado(s)`;
+                statFiles.innerText = `${this.files.length} archivos`;
+                statOriginal.innerText = `${totalMB} MB`;
+                statSymbio.innerText = `${symbioMB} MB`;
+                statEnvio.innerText = `${envioMB} MB`;
+                statTime.innerText = `~${estimatedSeconds} segundos`;
+            }
+        });
+
+        uploadForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            if (fileInput.files.length === 0) {
+                alert('Por favor, selecciona al menos un archivo primero.');
+                return;
+            }
+
+            btnSubmit.disabled = true;
+            let currentSec = estimatedSeconds;
+            statTime.innerText = `~${currentSec} segundos (Procesando...)`;
+
+            let countdownInterval = setInterval(() => {
+                currentSec--;
+                if (currentSec > 0) {
+                    statTime.innerText = `~${currentSec} segundos (Procesando...)`;
+                } else {
+                    clearInterval(countdownInterval);
+                    statTime.innerText = `¡Optimizado!`;
+                }
+            }, 1000);
+
+            let formData = new FormData();
+            for (let i = 0; i < fileInput.files.length; i++) {
+                formData.append('archivo', fileInput.files[i]);
+            }
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    setTimeout(() => {
+                        downloadLinksContainer.innerHTML = '';
+                        data.files.forEach(filename => {
+                            let a = document.createElement('a');
+                            a.href = `/download/${filename}`;
+                            a.className = 'download-btn';
+                            a.innerText = `⬇️ Descargar ${filename}`;
+                            downloadLinksContainer.appendChild(a);
+                        });
+                        downloadSection.style.display = 'block';
+                        btnSubmit.disabled = false;
+                        btnSubmit.innerText = '⚡ ¡Completado!';
+                    }, estimatedSeconds * 1000);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Hubo un error al procesar los archivos.');
+                btnSubmit.disabled = false;
+            });
+        });
+    </script>
+</body>
+</html>
