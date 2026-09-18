@@ -3,14 +3,15 @@ name: Symbio Cloud Runner
 on:
   workflow_dispatch:
     inputs:
-      input_url:
-        description: 'URL o archivo de entrada para procesar'
+      url:
+        description: 'URL del archivo multimedia a procesar'
         required: true
         default: 'https://www.w3schools.com/html/mov_bbb.mp4'
 
 jobs:
   process-media:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repositorio
         uses: actions/checkout@v4
@@ -20,26 +21,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Ejecutar perfilador y procesamiento en la nube
+      - name: Ejecutar transcodificación en la nube
         run: |
-          echo ">> Iniciando máquina virtual de alta potencia..."
-          nproc
+          echo "Iniciando máquina virtual de alta potencia..."
+          echo "Descargando archivo multimedia desde la URL..."
+          curl -L "${{ github.event.inputs.url }}" -o input.mp4
           
-          # Crear directorios de trabajo
-          mkdir -p output
-          
-          # Descargar recurso de prueba
-          echo ">> Descargando archivo multimedia..."
-          curl -L "${{ github.event.inputs.input_url }}" -o input.mp4
-          
-          # Procesamiento optimizado con los recursos de la nube (Cloud Runner High CPU)
-          echo ">> Procesando vídeo usando los núcleos de la nube..."
-          ffmpeg -y -i input.mp4 -c:v libx264 -preset fast -crf 26 -threads $(nproc) -c:a aac -b:a 128k output/result.mp4
-          
-          echo ">> ¡Procesamiento completado con éxito!"
+          echo "Procesando vídeo usando los núcleos de la nube..."
+          ffmpeg -i input.mp4 -vcodec libx264 -crf 28 output.mp4
 
       - name: Subir artefacto resultante
         uses: actions/upload-artifact@v4
         with:
-          name: symbio-processed-video
-          path: output/result.mp4
+          name: simbio-petruska-binario
+          path: output.mp4
