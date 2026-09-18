@@ -25,13 +25,16 @@ jobs:
         run: |
           echo "Iniciando máquina virtual de alta potencia..."
           echo "Descargando archivo multimedia desde la URL..."
-          curl -L "${{ github.event.inputs.url }}" -o input.mp4
+          curl -sL "${{ github.event.inputs.url }}" -o input.mp4
           
+          echo "Comprobando tamaño del archivo descargado..."
+          ls -l input.mp4
+
           echo "Procesando vídeo usando los núcleos de la nube..."
           ffmpeg -i input.mp4 -vcodec libx264 -crf 28 output.mp4
 
       - name: Subir artefacto resultante
         uses: actions/upload-artifact@v4
         with:
-          name: simbio-petruska-binario
+          name: symbio-petruzka-binario
           path: output.mp4
