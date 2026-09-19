@@ -1,0 +1,7 @@
+uploads/*
+optimizadas/*
+envios/*
+vault_cifrada/*
+__pycache__/
+*.pyc
+.session

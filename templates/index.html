@@ -5,142 +5,429 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Petruska Engine Pro</title>
     <style>
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
-            /* Primer fondo estático para que cargue rápido al abrir */
-            background: linear-gradient(rgba(5, 11, 20, 0.45), rgba(5, 11, 20, 0.65)), url('https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1920&q=80') no-repeat center center fixed; 
-            background-size: cover; 
-            color: #fff; 
-            padding: 10px; 
-            display: flex; 
-            justify-content: center; 
-            align-items: center; 
-            margin: 0; 
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: system-ui, -apple-system, sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
             min-height: 100vh;
-            /* Transición suave para que las imágenes se difuminen entre ellas */
-            transition: background-image 2s ease-in-out;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-size: cover;
+            background-position: center;
+            transition: background-image 1s ease-in-out;
         }
-        .card { background: rgba(13, 22, 40, 0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); padding: 16px; border-radius: 20px; width: 100%; max-width: 420px; box-shadow: 0 20px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.25); border: 1px solid rgba(56, 189, 248, 0.35); }
-        .header-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-        h2 { color: #38bdf8; margin: 0; font-size: 19px; font-weight: 800; letter-spacing: -0.5px; text-shadow: 0 2px 8px rgba(0,0,0,0.8); }
-        p.subtitle { color: #cbd5e1; font-size: 10px; margin: 2px 0 10px 0; text-shadow: 0 1px 4px rgba(0,0,0,0.8); }
-        .badge { background: rgba(6, 95, 70, 0.85); color: #34d399; padding: 3px 10px; border-radius: 20px; font-size: 10px; font-weight: bold; border: 1px solid rgba(52, 211, 153, 0.4); }
-        .grid-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
-        .stat-box { background: rgba(15, 23, 42, 0.55); padding: 9px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.12); backdrop-filter: blur(5px); }
-        .stat-box small { color: #94a3b8; font-size: 9px; text-transform: uppercase; font-weight: bold; display: block; margin-bottom: 2px; }
-        .stat-box span { font-size: 14px; font-weight: bold; color: #f8fafc; }
-        .stat-box .percentage { color: #34d399; font-size: 9px; float: right; }
-        .time-box { background: rgba(15, 23, 42, 0.55); padding: 9px 12px; border-radius: 12px; margin: 10px 0; display: flex; align-items: center; justify-content: space-between; border-left: 4px solid #f59e0b; border: 1px solid rgba(255,255,255,0.12); backdrop-filter: blur(5px); }
-        .time-box div span { font-size: 15px; font-weight: bold; color: #f59e0b; }
-        .btn { background: linear-gradient(135deg, #00c6ff, #0072ff); color: white; border: none; padding: 12px; width: 100%; border-radius: 14px; font-weight: bold; cursor: pointer; font-size: 14px; margin-top: 12px; box-shadow: 0 4px 15px rgba(0, 114, 255, 0.4); transition: 0.2s; border: 1px solid rgba(255,255,255,0.3); }
-        .file-select-btn { background: rgba(30, 41, 59, 0.6); color: #38bdf8; border: 1px dashed rgba(56, 189, 248, 0.6); padding: 10px; text-align: center; border-radius: 10px; cursor: pointer; font-size: 11px; display: block; margin-bottom: 10px; }
-        input[type="file"] { display: none; }
-        .download-btn { background: rgba(2, 132, 199, 0.85); display: block; text-align: center; text-decoration: none; padding: 8px; border-radius: 8px; color: white; margin-top: 6px; font-size: 11px; font-weight: bold; }
-        .download-btn.sympio { background: rgba(16, 185, 129, 0.85); }
-        .footer { text-align: center; font-size: 9px; color: #cbd5e1; margin-top: 10px; }
+        .overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(15, 23, 42, 0.45);
+            backdrop-filter: blur(2px);
+            z-index: 1;
+        }
+        .container {
+            position: relative;
+            z-index: 2;
+            width: 100%;
+            max-width: 460px;
+            padding: 15px;
+            box-sizing: border-box;
+        }
+        .card {
+            background: rgba(15, 23, 42, 0.88);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.6);
+        }
+        h1 {
+            font-size: 20px;
+            color: #38bdf8;
+            margin-top: 0;
+            margin-bottom: 2px;
+            text-align: center;
+        }
+        .subtitle {
+            font-size: 11px;
+            color: #94a3b8;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+        .btn-select {
+            background: rgba(30, 41, 59, 0.8);
+            border: 2px dashed rgba(56, 189, 248, 0.5);
+            color: #38bdf8;
+            padding: 12px;
+            border-radius: 14px;
+            width: 100%;
+            font-weight: bold;
+            cursor: pointer;
+            text-align: center;
+            display: block;
+            box-sizing: border-box;
+            margin-bottom: 12px;
+        }
+        .grid-metrics {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .metric-box {
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            border-radius: 12px;
+            padding: 10px;
+            position: relative;
+        }
+        .metric-title {
+            font-size: 10px;
+            color: #94a3b8;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+        .metric-value {
+            font-size: 16px;
+            color: #f8fafc;
+            font-weight: bold;
+            margin-top: 4px;
+        }
+        .badge-percent {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            font-size: 11px;
+            font-weight: bold;
+            color: #34d399;
+        }
+        .time-box {
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            border-radius: 12px;
+            padding: 10px 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            font-size: 13px;
+        }
+        .btn-action {
+            background: linear-gradient(135deg, #0284c7, #0ea5e9);
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 12px;
+            width: 100%;
+            font-weight: bold;
+            cursor: pointer;
+            text-align: center;
+            display: block;
+            box-sizing: border-box;
+            text-decoration: none;
+            font-size: 14px;
+            box-shadow: 0 4px 12px rgba(14, 165, 233, 0.4);
+        }
+        
+        /* Sección de resultados y doble opción */
+        #results-section {
+            margin-top: 15px;
+            display: none;
+        }
+        .result-card {
+            background: rgba(30, 41, 59, 0.8);
+            border: 1px solid rgba(52, 211, 153, 0.4);
+            border-radius: 14px;
+            padding: 12px;
+            margin-bottom: 10px;
+        }
+        .file-title {
+            font-size: 12px;
+            font-weight: bold;
+            color: #38bdf8;
+            margin-bottom: 8px;
+            word-break: break-all;
+        }
+        .download-options {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .btn-opt {
+            background: #0284c7;
+            color: white;
+            padding: 8px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 10px;
+            text-align: center;
+        }
+        .btn-env {
+            background: #10b981;
+            color: white;
+            padding: 8px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 10px;
+            text-align: center;
+        }
+        .btn-preview {
+            background: #475569;
+            color: white;
+            padding: 6px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 11px;
+            text-align: center;
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        /* Modal o Visor Previo */
+        #preview-modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        #preview-content {
+            max-width: 100%;
+            max-height: 70vh;
+            border-radius: 12px;
+            margin-bottom: 15px;
+        }
+        .close-modal {
+            background: #ef4444;
+            color: white;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .device-telemetry {
+            margin-top: 15px;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            border-radius: 10px;
+            padding: 8px 12px;
+            font-size: 11px;
+            color: #94a3b8;
+            text-align: center;
+        }
+        .footer-info {
+            margin-top: 10px;
+            font-size: 10px;
+            color: #64748b;
+            text-align: center;
+            border-top: 1px solid rgba(255,255,255,0.05);
+            padding-top: 8px;
+        }
+        .logout-link {
+            color: #fca5a5;
+            text-decoration: none;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
-    <div class="card">
-        <div class="header-top">
-            <div><h2>Petruska Engine Pro</h2><p class="subtitle">La información, en su forma más eficiente.</p></div>
-            <span class="badge">Licencia: OK</span>
-        </div>
-        <form id="upload-form">
-            <label class="file-select-btn" for="file-input">
-                📁 <span id="file-label-text">Seleccionar Archivos Multimedia</span>
-            </label>
-            <input type="file" id="file-input" name="files" multiple required>
-            <div class="grid-stats">
-                <div class="stat-box"><small>Seleccionados</small><span id="stat-count">0 archivos</span></div>
-                <div class="stat-box"><small>Original</small><span id="stat-original">0.0 MB</span></div>
-                <div class="stat-box" style="background: rgba(16, 185, 129, 0.25);"><small>Est. Petruska</small><span id="stat-sympio">0.0 MB</span><span class="percentage" id="pct-sympio">-90.0%</span></div>
-                <div class="stat-box" style="background: rgba(2, 132, 199, 0.25);"><small>Envio Optimizado</small><span id="stat-envio">0.0 MB</span><span class="percentage" id="pct-envio" style="color:#38bdf8;">-60.0%</span></div>
+    <div class="overlay"></div>
+    <div class="container">
+        <div class="card">
+            <h1>Petruska Engine Pro</h1>
+            <div class="subtitle">La información, en su forma más eficiente.</div>
+
+            <form id="upload-form">
+                <label class="btn-select">
+                    📁 Seleccionar Archivos Multimedia
+                    <input type="file" id="file-input" name="files" multiple style="display: none;" onchange="manejarSeleccion()">
+                </label>
+            </form>
+
+            <div class="grid-metrics">
+                <div class="metric-box">
+                    <div class="metric-title">Seleccionados</div>
+                    <div class="metric-value" id="val-count">0 archivos</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">Original</div>
+                    <div class="metric-value" id="val-orig">0.0 MB</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">Est. Petruska</div>
+                    <div class="metric-value" id="val-est">0.0 MB</div>
+                    <div class="badge-percent">-90.0%</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">Envío Optimizado</div>
+                    <div class="metric-value" id="val-env">0.0 MB</div>
+                    <div class="badge-percent">-60.0%</div>
+                </div>
             </div>
-            <div class="time-box"><div><small style="color: #94a3b8; font-size: 9px;">TIEMPO ESTIMADO</small><span id="stat-time">~0 segundos</span></div><div style="font-size: 16px;">⏱️</div></div>
-            <button type="submit" class="btn" id="submit-btn">⚡ Comprimir y Optimizar →</button>
-        </form>
-        <div id="results-container" style="margin-top: 10px;"></div>
-        <div class="footer">Tecnología que comprime tu mundo. | <b>Petruska Engine Pro v4.5</b> | 🔒 Privacidad</div>
+
+            <div class="time-box">
+                <span>⏱️ Tiempo estimado</span>
+                <span id="val-time" style="color: #fbbf24; font-weight: bold;">~0 segundos</span>
+            </div>
+
+            <button type="button" class="btn-action" onclick="ejecutarProceso()">
+                ⚡ Comprimir & Optimizar &rarr;
+            </button>
+
+            <!-- Sección de Opciones de Descarga y Previsualizador -->
+            <div id="results-section">
+                <div style="font-size: 11px; font-weight: bold; color: #34d399; margin-bottom: 8px; text-align: center;">✅ Opciones de Descarga Listas</div>
+                <div id="results-list"></div>
+            </div>
+
+            <!-- Hardware detectado de la Tablet -->
+            <div class="device-telemetry" id="client-device-info">
+                🔍 Detectando dispositivo cliente...
+            </div>
+
+            <div class="footer-info">
+                Petruska Engine v4.5 🔒 | <a href="/logout" class="logout-link">Cerrar Sesión</a>
+            </div>
+        </div>
     </div>
-    
+
+    <!-- Modal Visualizador Previo -->
+    <div id="preview-modal">
+        <div id="preview-container"></div>
+        <button class="close-modal" onclick="cerrarPreview()">Cerrar Previsualización</button>
+    </div>
+
     <script>
-        // --- SISTEMA DE FONDOS INFINITOS (SOLO PAISAJES) ---
-        function cambiarFondoInfinito() {
-            // Generamos una semilla única basada en la hora actual para no repetir la imagen
-            const timestamp = new Date().getTime();
-            
-            // Conectamos a una API libre buscando únicamente las etiquetas "landscape,nature"
-            const nuevaImagenUrl = `https://loremflickr.com/1920/1080/landscape,nature?random=${timestamp}`;
-            
-            // PRECARGA: Descargamos la imagen en memoria antes de aplicarla para evitar tirones
-            const tempImg = new Image();
-            tempImg.src = nuevaImagenUrl;
-            tempImg.onload = () => {
-                document.body.style.backgroundImage = `linear-gradient(rgba(5, 11, 20, 0.45), rgba(5, 11, 20, 0.65)), url('${nuevaImagenUrl}')`;
-            };
+        const backgrounds = [
+            {% for img in bg_images %}
+            "/static/backgrounds/{{ img }}"{% if not loop.last %},{% endif %}
+            {% endfor %}
+        ];
+
+        let currentIndex = 0;
+        function cambiarFondo() {
+            if (backgrounds.length > 0) {
+                document.body.style.backgroundImage = `url('${backgrounds[currentIndex]}')`;
+                currentIndex = (currentIndex + 1) % backgrounds.length;
+            }
+        }
+        if(backgrounds.length > 0) {
+            cambiarFondo();
+            setInterval(cambiarFondo, 6000);
         }
 
-        // Cambia el fondo automáticamente cada 10 segundos
-        setInterval(cambiarFondoInfinito, 10000);
+        function detectarHardwareCliente() {
+            const cores = navigator.hardwareConcurrency || "Desconocidos";
+            const ua = navigator.userAgent;
+            let deviceType = "Tablet / Dispositivo Huésped";
+            
+            if (/iPad|Tablet/i.test(ua) || (navigator.maxTouchPoints > 1 && !/Mobile/i.test(ua))) {
+                deviceType = "Tablet Anfitrión";
+            } else if (/Mobile/i.test(ua)) {
+                deviceType = "Smartphone Anfitrión";
+            }
 
-        // --- LÓGICA DE LA APP DE COMPRESIÓN ---
-        const fileInput = document.getElementById('file-input');
-        fileInput.addEventListener('change', () => {
-            let totalMB = Array.from(fileInput.files).reduce((acc, file) => acc + file.size, 0) / (1024 * 1024);
-            document.getElementById('file-label-text').innerText = fileInput.files.length === 1 ? fileInput.files[0].name : `${fileInput.files.length} archivos`;
-            document.getElementById('stat-count').innerText = `${fileInput.files.length} archivos`;
-            document.getElementById('stat-original').innerText = `${totalMB.toFixed(1)} MB`;
-            document.getElementById('stat-time').innerText = `~${Math.max(5, Math.round(totalMB * 1.1))} segundos`;
-        });
+            document.getElementById('client-device-info').innerHTML = `
+                📱 Cliente: <b style="color: #38bdf8;">${deviceType}</b> (${cores} Núcleos Detectados)
+            `;
+        }
+        detectarHardwareCliente();
 
-        document.getElementById('upload-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const btn = document.getElementById('submit-btn');
-            btn.innerText = "⏳ Procesando versiones...";
-            btn.disabled = true;
+        function manejarSeleccion() {
+            const input = document.getElementById('file-input');
+            const files = input.files;
+            if (files.length > 0) {
+                let totalBytes = 0;
+                for(let i=0; i<files.length; i++) {
+                    totalBytes += files[i].size;
+                }
+                let totalMb = totalBytes / (1024 * 1024);
+                document.getElementById('val-count').innerText = `${files.length} archivos`;
+                document.getElementById('val-orig').innerText = totalMb.toFixed(1) + " MB";
+                document.getElementById('val-est').innerText = (totalMb * 0.1).toFixed(1) + " MB";
+                document.getElementById('val-env').innerText = (totalMb * 0.4).toFixed(1) + " MB";
+                document.getElementById('val-time').innerText = `~${Math.max(1, files.length * 1)} segundos`;
+            }
+        }
 
+        async function ejecutarProceso() {
+            const input = document.getElementById('file-input');
+            if (input.files.length === 0) {
+                alert("Por favor selecciona archivos multimedia primero.");
+                return;
+            }
+            
             const formData = new FormData();
-            for (let file of fileInput.files) formData.append('files', file);
+            for(let i=0; i<input.files.length; i++) {
+                formData.append('files', input.files[i]);
+            }
 
             try {
-                let response = await fetch('/process', { method: 'POST', body: formData });
-                let data = await response.json();
-                
-                let container = document.getElementById('results-container');
-                container.innerHTML = "<h3 style='color:#34d399; font-size:12px; text-align:center;'>✨ ¡Archivos optimizados con éxito!</h3>";
-                
-                let totalEnvio = 0, totalSympio = 0, totalOriginal = 0;
-
-                data.results.forEach(res => {
-                    totalEnvio += res.envio_mb;
-                    totalSympio += res.sympio_mb;
-                    totalOriginal += res.original_mb;
-                    container.innerHTML += `
-                        <div style="background:rgba(15, 23, 42, 0.75); padding:8px; border-radius:10px; margin-top:6px; border:1px solid rgba(56, 189, 248, 0.3);">
-                            <small style="color:#38bdf8; display:block; margin-bottom:4px;"><b>${res.original_name}</b></small>
-                            <a class="download-btn" href="/download/${res.envio_file}">📥 Descargar Envío (${res.envio_mb} MB)</a>
-                            <a class="download-btn sympio" href="/download/${res.sympio_file}">📥 Descargar Petruska (${res.sympio_mb} MB)</a>
-                        </div>
-                    `;
+                let response = await fetch('/process', {
+                    method: 'POST',
+                    body: formData
                 });
-
-                document.getElementById('stat-envio').innerText = `${totalEnvio.toFixed(2)} MB`;
-                document.getElementById('stat-sympio').innerText = `${totalSympio.toFixed(2)} MB`;
+                let result = await response.json();
                 
-                if(totalOriginal > 0) {
-                    document.getElementById('pct-envio').innerText = `-${((totalOriginal - totalEnvio) / totalOriginal * 100).toFixed(1)}%`;
-                    document.getElementById('pct-sympio').innerText = `-${((totalOriginal - totalSympio) / totalOriginal * 100).toFixed(1)}%`;
+                if(response.ok) {
+                    let resSection = document.getElementById('results-section');
+                    let resList = document.getElementById('results-list');
+                    resList.innerHTML = "";
+                    
+                    result.results.forEach(item => {
+                        resList.innerHTML += `
+                            <div class="result-card">
+                                <div class="file-title">📄 ${item.filename} (Orig: ${item.orig_mb} MB)</div>
+                                <button class="btn-preview" onclick="abrirPreview('${item.filename}')">👁️ Visualizar Antes de Descargar</button>
+                                <div class="download-options">
+                                    <a href="/download/opt/${item.filename}" class="btn-opt" download>⚡ Ultrareducido<br>(${item.opt_mb} MB)</a>
+                                    <a href="/download/envio/${item.filename}" class="btn-env" download>📤 Envío Óptimo<br>(${item.envio_mb} MB)</a>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    resSection.style.display = "block";
+                } else {
+                    alert("Error en el proceso: " + (result.error || "Desconocido"));
                 }
-
-                btn.innerText = "⚡ Comprimir de nuevo";
-                btn.disabled = false;
-            } catch (err) {
-                alert("Error en el proceso.");
-                btn.innerText = "⚡ Comprimir y Optimizar →";
-                btn.disabled = false;
+            } catch(e) {
+                alert("Error de red al procesar los archivos.");
             }
-        });
+        }
+
+        function abrirPreview(filename) {
+            const modal = document.getElementById('preview-modal');
+            const container = document.getElementById('preview-container');
+            const ext = filename.split('.').pop().toLowerCase();
+            
+            let html = "";
+            if(['mp4', 'webm', 'ogg', '3gp'].includes(ext)) {
+                html = `<video id="preview-content" controls autoplay src="/preview/envio/${filename}"></video>`;
+            } else {
+                html = `<img id="preview-content" src="/preview/envio/${filename}" alt="Preview">`;
+            }
+            container.innerHTML = html;
+            modal.style.display = "flex";
+        }
+
+        function cerrarPreview() {
+            const modal = document.getElementById('preview-modal');
+            const container = document.getElementById('preview-container');
+            container.innerHTML = "";
+            modal.style.display = "none";
+        }
     </script>
 </body>
 </html>
