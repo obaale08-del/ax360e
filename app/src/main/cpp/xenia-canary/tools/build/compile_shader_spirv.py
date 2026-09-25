@@ -93,7 +93,7 @@ def main():
         glslang_args = [
             glslang,
             "--stdin" if src_is_xesl else input_path,
-            "-DXESL_LANGUAGE_GLSL=1",
+            "-DSHADING_LANGUAGE_GLSL_XE=1",
             "-S", spirv_stage,
             "-o", glslang_spv,
             "-V",

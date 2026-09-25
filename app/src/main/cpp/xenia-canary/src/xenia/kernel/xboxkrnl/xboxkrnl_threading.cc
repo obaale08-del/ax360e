@@ -88,6 +88,33 @@ object_ref<T> LookupNamedObject(KernelState* kernel_state,
   return nullptr;
 }
 
+enum CreateThreadFlags : uint32_t {
+  ThreadInitiallySuspended = 0x00000001,
+  SystemThread = 0x00000002,
+  PriorityClass1 = 0x00000020,
+  PriorityClass2 = 0x00000040,
+  ReturnKThreadPtr = 0x00000080,
+  AffinityCpu0 = 0x01000000,
+  AffinityCpu1 = 0x02000000,
+  AffinityCpu2 = 0x04000000,
+  AffinityCpu3 = 0x08000000,
+  AffinityCpu4 = 0x10000000,
+  AffinityCpu5 = 0x20000000,
+};
+
+inline const std::map<uint32_t, std::string> ex_thread_flag_map = {
+    {ThreadInitiallySuspended, "Thread Initially Suspended"},
+    {SystemThread, "Guest Created System Thread"},
+    {PriorityClass1, "Thread Priority Class 1"},
+    {PriorityClass2, "Thread Priority Class 2"},
+    {ReturnKThreadPtr, "Return Kthread Ptr"},
+    {AffinityCpu0, "Thread Starts At Cpu 1"},
+    {AffinityCpu1, "Thread Starts At Cpu 2"},
+    {AffinityCpu2, "Thread Starts At Cpu 3"},
+    {AffinityCpu3, "Thread Starts At Cpu 4"},
+    {AffinityCpu4, "Thread Starts At Cpu 5"},
+    {AffinityCpu5, "Thread Starts At Cpu 6"}};
+
 uint32_t ExCreateThread(xe::be<uint32_t>* handle_ptr, uint32_t stack_size,
                         xe::be<uint32_t>* thread_id_ptr,
                         uint32_t xapi_thread_startup, uint32_t start_address,
@@ -103,17 +130,25 @@ uint32_t ExCreateThread(xe::be<uint32_t>* handle_ptr, uint32_t stack_size,
   // LPVOID   StartContext,
   // DWORD    CreationFlags // 0x80?
 
-  auto kernel_state_var = kernel_state();
-  // xenia_assert((creation_flags & 2) == 0);  // creating system thread?
-  if (creation_flags & 2) {
-    XELOGE("Guest is creating a system thread!");
-  }
+  std::string summary = "ExCreateThread Active:";
+  uint32_t unused_flag = creation_flags;
 
-  uint32_t thread_process = (creation_flags & 2)
-                                ? kernel_state_var->GetSystemProcess()
-                                : kernel_state_var->GetTitleProcess();
+  for (const auto& entry : ex_thread_flag_map) {
+    if (creation_flags & entry.first) {
+      summary += fmt::format(" {},", entry.second);
+      unused_flag &= ~entry.first;
+    }
+  }
+  if (unused_flag) {
+    summary += fmt::format(" Unk flag: {:08X}", unused_flag);
+  }
+  XELOGD("{}", summary);
+
+  uint32_t thread_process = (creation_flags & SystemThread)
+                                ? kernel_state()->GetSystemProcess()
+                                : kernel_state()->GetTitleProcess();
   X_KPROCESS* target_process =
-      kernel_state_var->memory()->TranslateVirtual<X_KPROCESS*>(thread_process);
+      kernel_state()->memory()->TranslateVirtual<X_KPROCESS*>(thread_process);
   // Inherit default stack size
   uint32_t actual_stack_size = stack_size;
 
@@ -138,7 +173,7 @@ uint32_t ExCreateThread(xe::be<uint32_t>* handle_ptr, uint32_t stack_size,
 
   if (XSUCCEEDED(result)) {
     if (handle_ptr) {
-      if (creation_flags & 0x80) {
+      if (creation_flags & ReturnKThreadPtr) {
         *handle_ptr = thread->guest_object();
       } else {
         *handle_ptr = thread->handle();
@@ -215,7 +250,8 @@ DECLARE_XBOXKRNL_EXPORT1(NtResumeThread, kThreading, kImplemented);
 
 dword_result_t KeResumeThread_entry(pointer_t<X_KTHREAD> thread_ptr) {
   X_STATUS result = X_STATUS_SUCCESS;
-  auto thread = XObject::GetNativeObject<XThread>(kernel_state(), thread_ptr);
+  auto thread = XObject::GetNativeObject<XThread>(kernel_state(), thread_ptr,
+                                                  DISPATCHER_THREAD);
   if (thread) {
     result = thread->Resume();
   } else {
@@ -279,8 +315,8 @@ DECLARE_XBOXKRNL_EXPORT1(NtSuspendThread, kThreading, kImplemented);
 
 dword_result_t KeSuspendThread_entry(pointer_t<X_KTHREAD> kthread,
                                      const ppc_context_t& context) {
-  auto thread =
-      XObject::GetNativeObject<XThread>(context->kernel_state, kthread);
+  auto thread = XObject::GetNativeObject<XThread>(context->kernel_state,
+                                                  kthread, DISPATCHER_THREAD);
   uint32_t suspend_count_out = 0;
 
   if (thread) {
@@ -321,7 +357,8 @@ void KeSetCurrentStackPointers_entry(lpvoid_t stack_ptr,
 DECLARE_XBOXKRNL_EXPORT2(KeSetCurrentStackPointers, kThreading, kImplemented,
                          kHighFrequency);
 
-dword_result_t KeSetAffinityThread_entry(lpvoid_t thread_ptr, dword_t affinity,
+dword_result_t KeSetAffinityThread_entry(pointer_t<X_KTHREAD> thread_ptr,
+                                         dword_t affinity,
                                          lpdword_t previous_affinity_ptr) {
   // The Xbox 360, according to disassembly of KeSetAffinityThread, unlike
   // Windows NT, stores the previous affinity via the pointer provided as an
@@ -330,7 +367,8 @@ dword_result_t KeSetAffinityThread_entry(lpvoid_t thread_ptr, dword_t affinity,
   if (!affinity) {
     return X_STATUS_INVALID_PARAMETER;
   }
-  auto thread = XObject::GetNativeObject<XThread>(kernel_state(), thread_ptr);
+  auto thread = XObject::GetNativeObject<XThread>(kernel_state(), thread_ptr,
+                                                  DISPATCHER_THREAD);
   if (!thread) {
     XELOGW(
         "KeSetAffinityThread: guest thread pointer {:08X} did not resolve to "
@@ -346,10 +384,12 @@ dword_result_t KeSetAffinityThread_entry(lpvoid_t thread_ptr, dword_t affinity,
 }
 DECLARE_XBOXKRNL_EXPORT1(KeSetAffinityThread, kThreading, kImplemented);
 
-dword_result_t KeQueryBasePriorityThread_entry(lpvoid_t thread_ptr) {
+dword_result_t KeQueryBasePriorityThread_entry(
+    pointer_t<X_KTHREAD> thread_ptr) {
   int32_t priority = 0;
 
-  auto thread = XObject::GetNativeObject<XThread>(kernel_state(), thread_ptr);
+  auto thread = XObject::GetNativeObject<XThread>(kernel_state(), thread_ptr,
+                                                  DISPATCHER_THREAD);
   if (thread) {
     priority = thread->QueryPriority();
   }
@@ -358,10 +398,11 @@ dword_result_t KeQueryBasePriorityThread_entry(lpvoid_t thread_ptr) {
 }
 DECLARE_XBOXKRNL_EXPORT1(KeQueryBasePriorityThread, kThreading, kImplemented);
 
-dword_result_t KeSetBasePriorityThread_entry(lpvoid_t thread_ptr,
+dword_result_t KeSetBasePriorityThread_entry(pointer_t<X_KTHREAD> thread_ptr,
                                              dword_t increment) {
   int32_t prev_priority = 0;
-  auto thread = XObject::GetNativeObject<XThread>(kernel_state(), thread_ptr);
+  auto thread = XObject::GetNativeObject<XThread>(kernel_state(), thread_ptr,
+                                                  DISPATCHER_THREAD);
 
   if (thread) {
     prev_priority = thread->QueryPriority();
@@ -388,9 +429,10 @@ DECLARE_XBOXKRNL_EXPORT1(KeSetDisableBoostThread, kThreading, kImplemented);
 uint32_t xeKeGetCurrentProcessType(cpu::ppc::PPCContext* context) {
   auto pcr = context->TranslateVirtualGPR<X_KPCR*>(context->r[13]);
 
-  if (!pcr->prcb_data.dpc_active)
+  if (!pcr->prcb_data.dpc_active) {
     return context->TranslateVirtual(pcr->prcb_data.current_thread)
         ->process_type;
+  }
   return pcr->processtype_value_in_dpc;
 }
 void xeKeSetCurrentProcessType(uint32_t type, cpu::ppc::PPCContext* context) {
@@ -523,10 +565,10 @@ DECLARE_XBOXKRNL_EXPORT1(KeTlsSetValue, kThreading, kImplemented);
 void KeInitializeEvent_entry(pointer_t<X_KEVENT> event_ptr, dword_t event_type,
                              dword_t initial_state) {
   event_ptr.Zero();
-  event_ptr->header.type = event_type;
-  event_ptr->header.signal_state = (uint32_t)initial_state;
-  auto ev =
-      XObject::GetNativeObject<XEvent>(kernel_state(), event_ptr, event_type);
+  event_ptr->header.type = static_cast<X_DISPATCHER_FLAGS>(event_type.value());
+  event_ptr->header.signal_state = initial_state.value();
+  auto ev = XObject::GetNativeObject<XEvent>(kernel_state(), event_ptr,
+                                             event_ptr->header.type);
   if (!ev) {
     assert_always();
     return;
@@ -535,7 +577,8 @@ void KeInitializeEvent_entry(pointer_t<X_KEVENT> event_ptr, dword_t event_type,
 DECLARE_XBOXKRNL_EXPORT1(KeInitializeEvent, kThreading, kImplemented);
 
 uint32_t xeKeSetEvent(X_KEVENT* event_ptr, uint32_t increment, uint32_t wait) {
-  auto ev = XObject::GetNativeObject<XEvent>(kernel_state(), event_ptr);
+  auto ev = XObject::GetNativeObject<XEvent>(kernel_state(), event_ptr,
+                                             event_ptr->header.type);
   if (!ev) {
     assert_always();
     return 0;
@@ -552,7 +595,8 @@ DECLARE_XBOXKRNL_EXPORT2(KeSetEvent, kThreading, kImplemented, kHighFrequency);
 
 dword_result_t KePulseEvent_entry(pointer_t<X_KEVENT> event_ptr,
                                   dword_t increment, dword_t wait) {
-  auto ev = XObject::GetNativeObject<XEvent>(kernel_state(), event_ptr);
+  auto ev = XObject::GetNativeObject<XEvent>(kernel_state(), event_ptr,
+                                             event_ptr->header.type);
   if (!ev) {
     assert_always();
     return 0;
@@ -564,7 +608,8 @@ DECLARE_XBOXKRNL_EXPORT2(KePulseEvent, kThreading, kImplemented,
                          kHighFrequency);
 
 dword_result_t KeResetEvent_entry(pointer_t<X_KEVENT> event_ptr) {
-  auto ev = XObject::GetNativeObject<XEvent>(kernel_state(), event_ptr);
+  auto ev = XObject::GetNativeObject<XEvent>(kernel_state(), event_ptr,
+                                             event_ptr->header.type);
   if (!ev) {
     assert_always();
     return 0;
@@ -691,12 +736,12 @@ DECLARE_XBOXKRNL_EXPORT2(NtClearEvent, kThreading, kImplemented,
 // https://msdn.microsoft.com/en-us/library/windows/hardware/ff552150(v=vs.85).aspx
 void KeInitializeSemaphore_entry(pointer_t<X_KSEMAPHORE> semaphore_ptr,
                                  dword_t count, dword_t limit) {
-  semaphore_ptr->header.type = 5;  // SemaphoreObject
+  semaphore_ptr->header.type = DISPATCHER_SEMAPHORE;
   semaphore_ptr->header.signal_state = (uint32_t)count;
   semaphore_ptr->limit = (uint32_t)limit;
 
   auto sem = XObject::GetNativeObject<XSemaphore>(kernel_state(), semaphore_ptr,
-                                                  5 /* SemaphoreObject */);
+                                                  DISPATCHER_SEMAPHORE);
   if (!sem) {
     assert_always();
     return;
@@ -706,8 +751,8 @@ DECLARE_XBOXKRNL_EXPORT1(KeInitializeSemaphore, kThreading, kImplemented);
 
 uint32_t xeKeReleaseSemaphore(X_KSEMAPHORE* semaphore_ptr, uint32_t increment,
                               uint32_t adjustment, uint32_t wait) {
-  auto sem =
-      XObject::GetNativeObject<XSemaphore>(kernel_state(), semaphore_ptr);
+  auto sem = XObject::GetNativeObject<XSemaphore>(kernel_state(), semaphore_ptr,
+                                                  DISPATCHER_SEMAPHORE);
   if (!sem) {
     assert_always();
     return 0;
@@ -1013,7 +1058,7 @@ dword_result_t KeWaitForMultipleObjects_entry(
     dword_t count, lpdword_t objects_ptr, dword_t wait_type,
     dword_t wait_reason, dword_t processor_mode, dword_t alertable,
     lpqword_t timeout_ptr, lpvoid_t wait_block_array_ptr) {
-  assert_true(wait_type <= 1);
+  assert_true(wait_type <= X_KWAIT_REASON::WaitAny);
 
   assert_true(count <= 64);
   object_ref<XObject> objects[64];
@@ -1021,8 +1066,8 @@ dword_result_t KeWaitForMultipleObjects_entry(
     auto crit = global_critical_region::AcquireDirect();
     for (uint32_t n = 0; n < count; n++) {
       auto object_ptr = kernel_memory()->TranslateVirtual(objects_ptr[n]);
-      auto object_ref = XObject::GetNativeObject<XObject>(kernel_state(),
-                                                          object_ptr, -1, true);
+      auto object_ref = XObject::GetNativeObject<XObject>(
+          kernel_state(), object_ptr, DISPATCHER_UNDEFINED, true);
       if (!object_ref) {
         return X_STATUS_INVALID_PARAMETER;
       }
@@ -1048,7 +1093,7 @@ uint32_t xeNtWaitForMultipleObjectsEx(uint32_t count, xe::be<uint32_t>* handles,
                                       uint32_t wait_type, uint32_t wait_mode,
                                       uint32_t alertable,
                                       uint64_t* timeout_ptr) {
-  assert_true(wait_type <= 1);
+  assert_true(wait_type <= X_KWAIT_REASON::WaitAny);
 
   assert_true(count <= 64);
   object_ref<XObject> objects[64];
@@ -1090,7 +1135,8 @@ dword_result_t NtWaitForMultipleObjectsEx_entry(
     dword_t count, lpdword_t handles, dword_t wait_type, dword_t wait_mode,
     dword_t alertable, lpqword_t timeout_ptr) {
   uint64_t timeout = timeout_ptr ? static_cast<uint64_t>(*timeout_ptr) : 0u;
-  if (!count || count > 64 || (wait_type != 1 && wait_type)) {
+  if (!count || count > 64 ||
+      (wait_type != X_KWAIT_REASON::WaitAny && wait_type)) {
     return X_STATUS_INVALID_PARAMETER;
   }
   return xeNtWaitForMultipleObjectsEx(count, handles, wait_type, wait_mode,
@@ -1592,11 +1638,6 @@ dword_result_t KeInsertQueueDpc_entry(pointer_t<XDPC> dpc, dword_t arg1,
   auto global_lock = xe::global_critical_region::AcquireDirect();
   auto dpc_list = kernel_state()->dpc_list();
 
-  // If already in a queue, abort.
-  if (dpc_list->IsQueued(list_entry_ptr)) {
-    return 0;
-  }
-
   // Prep DPC.
   dpc->arg1 = (uint32_t)arg1;
   dpc->arg2 = (uint32_t)arg2;
@@ -1875,19 +1916,21 @@ dword_result_t KeSetPriorityThread_entry(pointer_t<X_KTHREAD> thread_ptr,
     return 0;
   }
 
-  if (thread_ptr->header.type != 6) {
-    XELOGW("{}: Invalid object type: {}", __func__, thread_ptr->header.type);
+  if (thread_ptr->header.type != DISPATCHER_THREAD) {
+    XELOGW("{}: Invalid object type: {}", __func__,
+           static_cast<uint8_t>(thread_ptr->header.type));
   }
 
   X_KPRCB* prcb = context->TranslateVirtual(thread_ptr->a_prcb_ptr);
   const uint32_t old_irql = xeKeKfAcquireSpinLock(context, &prcb->spin_lock);
   const uint8_t old_priority = thread_ptr->priority;
 
-  auto thread_ref =
-      XObject::GetNativeObject<XThread>(kernel_state(), thread_ptr);
+  auto thread_ref = XObject::GetNativeObject<XThread>(
+      kernel_state(), thread_ptr, DISPATCHER_THREAD);
 
   if (!thread_ref) {
-    XELOGW("{}: Missing native thread: {}", __func__, thread_ptr->header.type);
+    XELOGW("{}: Missing native thread: {}", __func__,
+           static_cast<uint8_t>(thread_ptr->header.type));
   } else {
     thread_ref->SetPriority(new_priority);
   }
@@ -1905,7 +1948,8 @@ void xeKeInitializeTimerEx(X_KTIMER* timer, uint32_t type, uint32_t proctype,
   // initialize
   timer->header.process_type = proctype;
   timer->header.inserted = 0;
-  timer->header.type = type + 8;
+  timer->header.type =
+      type ? DISPATCHER_AUTO_RESET_TIMER : DISPATCHER_MANUAL_RESET_TIMER;
   timer->header.signal_state = 0;
   util::XeInitializeListHead(&timer->header.wait_list, context);
   timer->due_time = 0;

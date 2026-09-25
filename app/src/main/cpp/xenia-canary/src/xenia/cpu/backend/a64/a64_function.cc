@@ -12,7 +12,6 @@
 #include "xenia/cpu/backend/a64/a64_backend.h"
 #include "xenia/cpu/processor.h"
 #include "xenia/cpu/thread_state.h"
-#include "xenia/base/logging.h"
 
 namespace xe {
 namespace cpu {

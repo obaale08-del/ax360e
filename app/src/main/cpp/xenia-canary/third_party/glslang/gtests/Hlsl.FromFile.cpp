@@ -59,11 +59,14 @@ std::string FileNameAsCustomTestSuffix(
 
 using HlslCompileTest = GlslangTest<::testing::TestWithParam<FileNameEntryPointPair>>;
 using HlslVulkan1_1CompileTest = GlslangTest<::testing::TestWithParam<FileNameEntryPointPair>>;
+using HlslVulkan1_2CompileTest = GlslangTest<::testing::TestWithParam<FileNameEntryPointPair>>;
+using HlslSpv1_6CompileTest = GlslangTest<::testing::TestWithParam<FileNameEntryPointPair>>;
 using HlslCompileAndFlattenTest = GlslangTest<::testing::TestWithParam<FileNameEntryPointPair>>;
 using HlslLegalizeTest = GlslangTest<::testing::TestWithParam<FileNameEntryPointPair>>;
 using HlslDebugTest = GlslangTest<::testing::TestWithParam<FileNameEntryPointPair>>;
 using HlslDX9CompatibleTest = GlslangTest<::testing::TestWithParam<FileNameEntryPointPair>>;
 using HlslLegalDebugTest = GlslangTest<::testing::TestWithParam<FileNameEntryPointPair>>;
+using HlslNonSemanticShaderDebugInfoTest = GlslangTest<::testing::TestWithParam<FileNameEntryPointPair>>;
 
 // Compiling HLSL to pre-legalized SPIR-V under Vulkan semantics. Expected
 // to successfully generate both AST and SPIR-V.
@@ -78,6 +81,20 @@ TEST_P(HlslVulkan1_1CompileTest, FromFile)
 {
     loadFileCompileAndCheck(GlobalTestSettings.testRoot, GetParam().fileName,
                             Source::HLSL, Semantics::Vulkan, glslang::EShTargetVulkan_1_1, glslang::EShTargetSpv_1_3,
+                            Target::BothASTAndSpv, true, GetParam().entryPoint);
+}
+
+TEST_P(HlslVulkan1_2CompileTest, FromFile)
+{
+    loadFileCompileAndCheck(GlobalTestSettings.testRoot, GetParam().fileName, Source::HLSL, Semantics::Vulkan,
+                            glslang::EShTargetVulkan_1_2, glslang::EShTargetSpv_1_4, Target::BothASTAndSpv, true,
+                            GetParam().entryPoint);
+}
+
+TEST_P(HlslSpv1_6CompileTest, FromFile)
+{
+    loadFileCompileAndCheck(GlobalTestSettings.testRoot, GetParam().fileName,
+                            Source::HLSL, Semantics::Vulkan, glslang::EShTargetVulkan_1_3, glslang::EShTargetSpv_1_6,
                             Target::BothASTAndSpv, true, GetParam().entryPoint);
 }
 
@@ -128,6 +145,13 @@ TEST_P(HlslLegalDebugTest, FromFile)
                             "/baseResults/", true, true);
 }
 
+TEST_P(HlslNonSemanticShaderDebugInfoTest, FromFile)
+{
+    loadFileCompileAndCheck(GlobalTestSettings.testRoot, GetParam().fileName,
+                            Source::HLSL, Semantics::Vulkan, glslang::EShTargetVulkan_1_0,  glslang::EShTargetSpv_1_0,
+                            Target::Spv, true, GetParam().entryPoint, "/baseResults/", false, true, true);
+}
+
 // clang-format off
 INSTANTIATE_TEST_SUITE_P(
     ToSpirv, HlslCompileTest,
@@ -146,10 +170,12 @@ INSTANTIATE_TEST_SUITE_P(
         {"hlsl.basic.geom", "main"},
         {"hlsl.boolConv.vert", "main"},
         {"hlsl.buffer.frag", "PixelShaderFunction"},
+        {"hlsl.buffer-offsets.comp", "main"},
         {"hlsl.calculatelod.dx10.frag", "main"},
         {"hlsl.calculatelodunclamped.dx10.frag", "main"},
         {"hlsl.cast.frag", "PixelShaderFunction"},
         {"hlsl.cbuffer-identifier.vert", "main"},
+        {"hlsl.cbuffer-offsets.comp", "main"},
         {"hlsl.charLit.vert", "main"},
         {"hlsl.clip.frag", "main"},
         {"hlsl.clipdistance-1.frag", "main"},
@@ -189,8 +215,10 @@ INSTANTIATE_TEST_SUITE_P(
         {"hlsl.earlydepthstencil.frag", "main"},
         {"hlsl.emptystructreturn.frag", "main"},
         {"hlsl.emptystructreturn.vert", "main"},
+        {"hlsl.emptystructreturn.tesc", "main"},
         {"hlsl.emptystruct.init.vert", "main"},
         {"hlsl.entry-in.frag", "PixelShaderFunction"},
+        {"hlsl.entry-inout.vert", "main"},
         {"hlsl.entry-out.frag", "PixelShaderFunction"},
         {"hlsl.fraggeom.frag", "main"},
         {"hlsl.float1.frag", "PixelShaderFunction"},
@@ -235,6 +263,7 @@ INSTANTIATE_TEST_SUITE_P(
         {"hlsl.groupid.comp", "main"},
         {"hlsl.identifier.sample.frag", "main"},
         {"hlsl.if.frag", "PixelShaderFunction"},
+        {"hlsl.imageload-subvec4.comp", "main"},
         {"hlsl.imagefetch-subvec4.comp", "main"},
         {"hlsl.implicitBool.frag", "main"},
         {"hlsl.inf.vert", "main"},
@@ -245,7 +274,6 @@ INSTANTIATE_TEST_SUITE_P(
         {"hlsl.isfinite.frag", "main"},
         {"hlsl.intrinsics.barriers.comp", "ComputeShaderFunction"},
         {"hlsl.intrinsics.comp", "ComputeShaderFunction"},
-        {"hlsl.intrinsics.evalfns.frag", "main"},
         {"hlsl.intrinsics.d3dcolortoubyte4.frag", "main"},
         {"hlsl.intrinsics.double.frag", "PixelShaderFunction"},
         {"hlsl.intrinsics.f1632.frag", "main"},
@@ -293,9 +321,11 @@ INSTANTIATE_TEST_SUITE_P(
         {"hlsl.mul-truncate.frag", "main"},
         {"hlsl.multiEntry.vert", "RealEntrypoint"},
         {"hlsl.multiReturn.frag", "main"},
+        {"hlsl.multiView.frag", "main"},
         {"hlsl.matrixindex.frag", "main"},
         {"hlsl.nonstaticMemberFunction.frag", "main"},
         {"hlsl.numericsuffixes.frag", "main"},
+        {"hlsl.numericsuffixes.negative.frag", "main"},
         {"hlsl.numthreads.comp", "main_aux2"},
         {"hlsl.overload.frag", "PixelShaderFunction"},
         {"hlsl.opaque-type-bug.frag", "main"},
@@ -308,10 +338,12 @@ INSTANTIATE_TEST_SUITE_P(
         {"hlsl.pp.vert", "main"},
         {"hlsl.pp.line.frag", "main"},
         {"hlsl.precise.frag", "main"},
+        {"hlsl.printf.comp", "main"},
         {"hlsl.promote.atomic.frag", "main"},
         {"hlsl.promote.binary.frag", "main"},
         {"hlsl.promote.vec1.frag", "main"},
         {"hlsl.promotions.frag", "main"},
+        {"hlsl.round.dx10.frag", "main"},
         {"hlsl.rw.atomics.frag", "main"},
         {"hlsl.rw.bracket.frag", "main"},
         {"hlsl.rw.register.frag", "main"},
@@ -383,10 +415,13 @@ INSTANTIATE_TEST_SUITE_P(
         {"hlsl.structbuffer.fn2.comp", "main"},
         {"hlsl.structbuffer.rw.frag", "main"},
         {"hlsl.structbuffer.rwbyte.frag", "main"},
+        {"hlsl.structbuffer.rwbyte2.comp", "main"},
+        {"hlsl.structcopy.comp", "main"},
         {"hlsl.structin.vert", "main"},
         {"hlsl.structIoFourWay.frag", "main"},
         {"hlsl.structStructName.frag", "main"},
         {"hlsl.subpass.frag", "main"},
+        {"hlsl.swizzle.vec1.comp", "main"},
         {"hlsl.synthesizeInput.frag", "main"},
         {"hlsl.texturebuffer.frag", "main"},
         {"hlsl.texture.struct.frag", "main"},
@@ -398,6 +433,7 @@ INSTANTIATE_TEST_SUITE_P(
         {"hlsl.matType.bool.frag", "main"},
         {"hlsl.matType.int.frag", "main"},
         {"hlsl.max.frag", "PixelShaderFunction"},
+        {"hlsl.nested-runtimeArray.frag", "main"},
         {"hlsl.preprocessor.frag", "main"},
         {"hlsl.precedence.frag", "PixelShaderFunction"},
         {"hlsl.precedence2.frag", "PixelShaderFunction"},
@@ -423,7 +459,8 @@ INSTANTIATE_TEST_SUITE_P(
         {"hlsl.typedef.frag", "PixelShaderFunction"},
         {"hlsl.whileLoop.frag", "PixelShaderFunction"},
         {"hlsl.void.frag", "PixelShaderFunction"},
-        {"hlsl.type.type.conversion.all.frag", "main"}
+        {"hlsl.type.type.conversion.all.frag", "main"},
+        {"hlsl.instance.geom", "GeometryShader"}
     }),
     FileNameAsCustomTestSuffix
 );
@@ -442,6 +479,25 @@ INSTANTIATE_TEST_SUITE_P(
         {"hlsl.wavevote.comp", "CSMain"},
         { "hlsl.type.type.conversion.valid.frag", "main" },
         {"hlsl.int.dot.frag", "main"}
+    }),
+    FileNameAsCustomTestSuffix
+);
+
+INSTANTIATE_TEST_SUITE_P(
+    ToSpirv, HlslVulkan1_2CompileTest,
+    ::testing::ValuesIn(std::vector<FileNameEntryPointPair>{
+        {"hlsl.buffer_ref_parameter.comp", "main"},
+    }),
+    FileNameAsCustomTestSuffix
+);
+// clang-format on
+
+// clang-format off
+INSTANTIATE_TEST_SUITE_P(
+    ToSpirv, HlslSpv1_6CompileTest,
+    ::testing::ValuesIn(std::vector<FileNameEntryPointPair>{
+       {"hlsl.spv.1.6.discard.frag", "PixelShaderFunction"},
+       {"hlsl.structcopylogical.comp","main"},
     }),
     FileNameAsCustomTestSuffix
 );
@@ -469,6 +525,7 @@ INSTANTIATE_TEST_SUITE_P(
         {"hlsl.flattenOpaqueInitMix.vert", "main"},
         {"hlsl.flattenSubset.frag", "main"},
         {"hlsl.flattenSubset2.frag", "main"},
+        {"hlsl.intrinsics.evalfns.frag", "main"},
         {"hlsl.partialFlattenLocal.vert", "main"},
         {"hlsl.partialFlattenMixed.vert", "main"}
     }),
@@ -489,6 +546,7 @@ INSTANTIATE_TEST_SUITE_P(
 INSTANTIATE_TEST_SUITE_P(
     ToSpirv, HlslDX9CompatibleTest,
     ::testing::ValuesIn(std::vector<FileNameEntryPointPair>{
+        {"hlsl.round.dx9.frag", "main"},
         {"hlsl.sample.dx9.frag", "main"},
         {"hlsl.sample.dx9.vert", "main"},
     }),
@@ -503,7 +561,21 @@ INSTANTIATE_TEST_SUITE_P(
     }),
     FileNameAsCustomTestSuffix
 );
+// clang-format on
 
+// clang-format off
+INSTANTIATE_TEST_SUITE_P(
+    ToSpirv, HlslNonSemanticShaderDebugInfoTest,
+    ::testing::ValuesIn(std::vector<FileNameEntryPointPair>{
+        {"spv.debuginfo.hlsl.vert", "main"},
+        {"spv.debuginfo.hlsl.frag", "main"},
+        {"spv.debuginfo.hlsl.comp", "main"},
+        {"spv.debuginfo.hlsl.geom", "main"},
+        {"spv.debuginfo.hlsl.tesc", "main"},
+        {"spv.debuginfo.hlsl.tese", "main"},
+    }),
+    FileNameAsCustomTestSuffix
+);
 // clang-format on
 
 }  // anonymous namespace

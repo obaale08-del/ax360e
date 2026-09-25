@@ -65,6 +65,14 @@ public class AboutActivity extends AppCompatActivity {
                 + " *部分修正\n"
                 +"1.17(2026-06-20)\n"
                 + " *部分修正\n"
+                +"1.18(2026-07-19)\n"
+                + " *部分修正与优化\n"
+                + " *自定义配置\n"
+                + " *补丁支持\n"
+                +"1.19(2026-08-16)\n"
+                + " *同步xenia canary的更新\n"
+                + " *覆盖层（imgui）显示时，劫持输入\n"
+                + " *部分修正与优化\n"
                 + " \n";
 
         return log;
@@ -76,6 +84,8 @@ public class AboutActivity extends AppCompatActivity {
     {
         supportRequestWindowFeature(Window.FEATURE_NO_TITLE);
         super.onCreate(savedInstanceState);
+
+        Utils.setup_system_bars_appearance(this);
 
         setContentView(R.layout.activity_about);
         

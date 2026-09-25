@@ -19,7 +19,6 @@
 #include <mutex>
 #include <sstream>
 
-#include "xenia/base/logging.h"
 #include "xenia/base/math.h"
 #include "xenia/base/platform.h"
 #include "xenia/base/string.h"
@@ -134,7 +133,7 @@ static void InstallCleanupHandlers() {
   std::atexit(CleanupAtExit);
   std::at_quick_exit(CleanupAtExit);
 }
-#endif  // !XE_PLATFORM_ANDROID
+#endif  // !XE_PLATFORM_ANDROID && !XE_PLATFORM_AX360E
 
 void* AllocFixed(void* base_address, size_t length,
                  AllocationType allocation_type, PageAccess access) {
@@ -153,7 +152,6 @@ void* AllocFixed(void* base_address, size_t length,
     flags |= MAP_FIXED;
   }
 
-  XELOGI("AllocFixed {:x} -> {:x}", reinterpret_cast<uint64_t >(base_address),reinterpret_cast<uint64_t >(base_address)+length);
   void* result = mmap(base_address, length, prot, flags, -1, 0);
 
   if (result != MAP_FAILED) {
@@ -335,7 +333,7 @@ void CloseFileMappingHandle(FileMappingHandle handle,
       g_shm_file_names.erase(it);
     }
   }
-#endif
+#endif  // !XE_PLATFORM_ANDROID && !XE_PLATFORM_AX360E
 }
 
 void* MapFileView(FileMappingHandle handle, void* base_address, size_t length,
@@ -346,9 +344,8 @@ void* MapFileView(FileMappingHandle handle, void* base_address, size_t length,
   if (base_address != nullptr) {
       flags |= MAP_FIXED;
   }
-    XELOGI("MapFileView {:x} -> {:x}", reinterpret_cast<uint64_t >(base_address),reinterpret_cast<uint64_t >(base_address)+length);
 
-    void* result = mmap(base_address, length, prot, flags, handle, file_offset);
+  void* result = mmap(base_address, length, prot, flags, handle, file_offset);
 
   if (result != MAP_FAILED) {
     std::lock_guard guard(g_mapped_file_ranges_mutex);

@@ -8,6 +8,10 @@
  */
 
 #include "xenia/kernel/xam/xam_ui.h"
+
+// For ImGuiContext internals (NavId/ActiveId) used by KeyboardInputDialog.
+#include "third_party/imgui/imgui_internal.h"
+
 #include "xenia/app/emulator_window.h"
 #include "xenia/base/png_utils.h"
 #include "xenia/base/system.h"
@@ -34,9 +38,19 @@ DEFINE_bool(storage_selection_dialog, false,
 
 DECLARE_int32(license_mask);
 
+constexpr std::chrono::milliseconds kUIDelayMillis(200);
+
 namespace xe {
 namespace kernel {
 namespace xam {
+
+#if XE_PLATFORM_AX360E
+// App-layer soft keyboard hooks (installed on Android), see xam_ui.h.
+std::function<void(const std::string&)> soft_keyboard_show_hook = nullptr;
+std::function<void()> soft_keyboard_hide_hook = nullptr;
+
+KeyboardInputDialog* KeyboardInputDialog::active_text_input_ = nullptr;
+#endif
 // TODO(gibbed): This is all one giant WIP that seems to work better than the
 // previous immediate synchronous completion of dialogs.
 //
@@ -71,9 +85,8 @@ X_RESULT xeXamDispatchDialog(T* dialog,
         kernel_state()->emulator()->display_window()->app_context();
     if (app_context.CallInUIThreadSynchronous(
             [&dialog, &fence]() { dialog->Then(&fence); })) {
-      kernel_state()->xam_state()->xam_dialogs_shown_++;
       fence.Wait();
-      kernel_state()->xam_state()->xam_dialogs_shown_--;
+      kernel_state()->xam_state()->is_xam_dialog_present_.store(false);
     } else {
       delete dialog;
     }
@@ -81,8 +94,11 @@ X_RESULT xeXamDispatchDialog(T* dialog,
     return result;
   };
   auto post = []() {
-    xe::threading::Sleep(std::chrono::milliseconds(100));
-    kernel_state()->BroadcastNotification(kXNotificationSystemUI, false);
+    std::thread t([] {
+      xe::threading::Sleep(kUIDelayMillis);
+      kernel_state()->BroadcastNotification(kXNotificationSystemUI, false);
+    });
+    t.detach();
   };
   if (!overlapped) {
     pre();
@@ -113,9 +129,8 @@ X_RESULT xeXamDispatchDialogEx(
     xe::threading::Fence fence;
     if (display_window->app_context().CallInUIThreadSynchronous(
             [&dialog, &fence]() { dialog->Then(&fence); })) {
-      kernel_state()->xam_state()->xam_dialogs_shown_++;
       fence.Wait();
-      kernel_state()->xam_state()->xam_dialogs_shown_--;
+      kernel_state()->xam_state()->is_xam_dialog_present_.store(false);
     } else {
       delete dialog;
     }
@@ -123,7 +138,7 @@ X_RESULT xeXamDispatchDialogEx(
     return result;
   };
   auto post = []() {
-    xe::threading::Sleep(std::chrono::milliseconds(100));
+    xe::threading::Sleep(kUIDelayMillis);
     kernel_state()->BroadcastNotification(kXNotificationSystemUI, false);
   };
   if (!overlapped) {
@@ -143,10 +158,15 @@ X_RESULT xeXamDispatchHeadless(std::function<X_RESULT()> run_callback,
                                uint32_t overlapped) {
   auto pre = []() {
     kernel_state()->BroadcastNotification(kXNotificationSystemUI, true);
+    xe::threading::Sleep(std::chrono::milliseconds(25));
   };
   auto post = []() {
-    xe::threading::Sleep(std::chrono::milliseconds(100));
-    kernel_state()->BroadcastNotification(kXNotificationSystemUI, false);
+    std::thread t([]() {
+      xe::threading::Sleep(kUIDelayMillis);
+      kernel_state()->BroadcastNotification(kXNotificationSystemUI, false);
+    });
+
+    t.detach();
   };
   if (!overlapped) {
     pre();
@@ -167,7 +187,7 @@ X_RESULT xeXamDispatchHeadlessEx(
     kernel_state()->BroadcastNotification(kXNotificationSystemUI, true);
   };
   auto post = []() {
-    xe::threading::Sleep(std::chrono::milliseconds(100));
+    xe::threading::Sleep(kUIDelayMillis);
     kernel_state()->BroadcastNotification(kXNotificationSystemUI, false);
   };
   if (!overlapped) {
@@ -188,17 +208,16 @@ template <typename T>
 X_RESULT xeXamDispatchDialogAsync(T* dialog,
                                   std::function<void(T*)> close_callback) {
   kernel_state()->BroadcastNotification(kXNotificationSystemUI, true);
-  kernel_state()->xam_state()->xam_dialogs_shown_++;
   // Important to pass captured vars by value here since we return from this
   // without waiting for the dialog to close so the original local vars will be
   // destroyed.
   dialog->set_close_callback([dialog, close_callback]() {
     close_callback(dialog);
 
-    kernel_state()->xam_state()->xam_dialogs_shown_--;
+    kernel_state()->xam_state()->is_xam_dialog_present_.store(false);
 
     auto run = []() -> void {
-      xe::threading::Sleep(std::chrono::milliseconds(100));
+      xe::threading::Sleep(kUIDelayMillis);
       kernel_state()->BroadcastNotification(kXNotificationSystemUI, false);
     };
 
@@ -211,16 +230,15 @@ X_RESULT xeXamDispatchDialogAsync(T* dialog,
 
 X_RESULT xeXamDispatchHeadlessAsync(std::function<void()> run_callback) {
   kernel_state()->BroadcastNotification(kXNotificationSystemUI, true);
-  kernel_state()->xam_state()->xam_dialogs_shown_++;
 
   auto display_window = kernel_state()->emulator()->display_window();
   display_window->app_context().CallInUIThread([run_callback]() {
     run_callback();
 
-    kernel_state()->xam_state()->xam_dialogs_shown_--;
+    kernel_state()->xam_state()->is_xam_dialog_present_.store(false);
 
     auto run = []() -> void {
-      xe::threading::Sleep(std::chrono::milliseconds(100));
+      xe::threading::Sleep(kUIDelayMillis);
       kernel_state()->BroadcastNotification(kXNotificationSystemUI, false);
     };
 
@@ -269,6 +287,17 @@ void KeyboardInputDialog::OnDraw(ImGuiIO& io) {
     has_opened_ = true;
     first_draw = true;
   }
+
+  ImGuiContext& g = *ImGui::GetCurrentContext();
+  // A/B presses targeting the input field are detected through the previous
+  // frame's focus: ImGui already consumed the press inside NewFrame (B clears
+  // the focus, A activates the widget) before this code runs.
+  const bool input_was_focused =
+      input_item_id_ != 0 && prev_nav_id_ == input_item_id_;
+  const bool a_pressed = ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false);
+  const bool b_pressed =
+      ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false);
+
   if (ImGui::BeginPopupModal(title_.c_str(), nullptr,
                              ImGuiWindowFlags_AlwaysAutoResize)) {
     if (description_.size()) {
@@ -278,9 +307,17 @@ void KeyboardInputDialog::OnDraw(ImGuiIO& io) {
       ImGui::SetKeyboardFocusHere();
     }
     ImGui::PushID("input_text");
+    ImGuiInputTextFlags input_flags = ImGuiInputTextFlags_EnterReturnsTrue;
+    if (input_was_focused && a_pressed) {
+      // A opens the platform soft keyboard instead of ImGui's built-in edit
+      // mode (which is unusable without a physical keyboard); keep the
+      // widget read-only so the activation has no effect.
+      input_flags |= ImGuiInputTextFlags_ReadOnly;
+    }
     bool input_submitted =
         ImGui::InputText("##body", text_buffer_.data(), text_buffer_.size(),
-                         ImGuiInputTextFlags_EnterReturnsTrue);
+                         input_flags);
+    input_item_id_ = ImGui::GetItemID();
     // Context menu for paste functionality
     if (ImGui::BeginPopupContextItem("input_context_menu")) {
       if (ImGui::MenuItem("Paste")) {
@@ -293,7 +330,39 @@ void KeyboardInputDialog::OnDraw(ImGuiIO& io) {
       ImGui::EndPopup();
     }
     ImGui::PopID();
-    if (input_submitted) {
+
+    bool handled_by_gamepad = false;
+    if (input_was_focused) {
+      if (b_pressed) {
+        // B while the input field is focused cancels the dialog.
+        cancelled_ = true;
+        ImGui::CloseCurrentPopup();
+        Close();
+        handled_by_gamepad = true;
+      } else if (a_pressed) {
+        // A while the input field is focused opens the platform soft
+        // keyboard. Cancel ImGui's own activation of the widget.
+        if (g.ActiveId == input_item_id_) {
+          ImGui::ClearActiveID();
+        }
+#if XE_PLATFORM_AX360E
+        active_text_input_ = this;
+        if (soft_keyboard_show_hook) {
+          soft_keyboard_show_hook(std::string(text_buffer_.data()));
+        }
+#endif
+        handled_by_gamepad = true;
+      }
+    }
+
+    if (!handled_by_gamepad && ime_commit_pending_) {
+      // The platform IME committed its text - act like the OK button.
+      ime_commit_pending_ = false;
+      text_ = std::string(text_buffer_.data());
+      cancelled_ = false;
+      ImGui::CloseCurrentPopup();
+      Close();
+    } else if (!handled_by_gamepad && input_submitted) {
       text_ = std::string(text_buffer_.data(), text_buffer_.size());
       cancelled_ = false;
       ImGui::CloseCurrentPopup();
@@ -317,8 +386,40 @@ void KeyboardInputDialog::OnDraw(ImGuiIO& io) {
   } else {
     Close();
   }
+  prev_nav_id_ = g.NavId;
 }
 
+KeyboardInputDialog::~KeyboardInputDialog() {
+#if XE_PLATFORM_AX360E
+  if (active_text_input_ == this) {
+    active_text_input_ = nullptr;
+    if (soft_keyboard_hide_hook) {
+      soft_keyboard_hide_hook();
+    }
+  }
+#endif
+}
+
+#if XE_PLATFORM_AX360E
+void KeyboardInputDialog::OnClose() {
+  if (active_text_input_ == this) {
+    active_text_input_ = nullptr;
+    if (soft_keyboard_hide_hook) {
+      soft_keyboard_hide_hook();
+    }
+  }
+  XamDialog::OnClose();
+}
+
+void KeyboardInputDialog::ApplyImeText(const std::string& text, bool commit) {
+  xe::string_util::copy_truncating(text_buffer_.data(), text,
+                                   text_buffer_.size());
+  if (commit) {
+    // Applied on the next OnDraw, where the popup context is current.
+    ime_commit_pending_ = true;
+  }
+}
+#endif
 static dword_result_t XamShowMessageBoxUi(
     dword_t user_index, lpu16string_t title_ptr, lpu16string_t text_ptr,
     dword_t button_count, lpdword_t button_ptrs, dword_t active_button,
@@ -332,7 +433,14 @@ static dword_result_t XamShowMessageBoxUi(
     uint32_t button_ptr = button_ptrs[i];
     auto button = xe::load_and_swap<std::u16string>(
         kernel_state()->memory()->TranslateVirtual(button_ptr));
-    buttons.push_back(xe::to_utf8(button));
+
+    if (!button.empty()) {
+      buttons.push_back(xe::to_utf8(button));
+    }
+  }
+
+  if (buttons.empty()) {
+    buttons.push_back("OK");
   }
 
   X_RESULT result;
@@ -356,6 +464,12 @@ static dword_result_t XamShowMessageBoxUi(
       } break;
     }
 
+    if (kernel_state()->xam_state()->IsUIActive()) {
+      return X_ERROR_ACCESS_DENIED;
+    }
+
+    kernel_state()->xam_state()->is_xam_dialog_present_.store(true);
+
     const Emulator* emulator = kernel_state()->emulator();
     xe::ui::ImGuiDrawer* imgui_drawer = emulator->imgui_drawer();
 
@@ -376,6 +490,7 @@ static dword_result_t XamShowMessageBoxUi(
     } else {
       auto close = [result_ptr](MessageBoxDialog* dialog) -> X_RESULT {
         result_ptr->ButtonPressed = dialog->chosen_button();
+        kernel_state()->xam_state()->is_xam_dialog_present_.store(false);
         return X_ERROR_SUCCESS;
       };
 
@@ -487,6 +602,13 @@ dword_result_t XamShowKeyboardUI_entry(
         return X_ERROR_SUCCESS;
       }
     };
+
+    if (kernel_state()->xam_state()->IsUIActive()) {
+      return X_ERROR_ACCESS_DENIED;
+    }
+
+    kernel_state()->xam_state()->is_xam_dialog_present_.store(true);
+
     const Emulator* emulator = kernel_state()->emulator();
     xe::ui::ImGuiDrawer* imgui_drawer = emulator->imgui_drawer();
 
@@ -524,7 +646,9 @@ dword_result_t XamShowDeviceSelectorUI_entry(
     // Default to the first storage device (HDD) if headless.
     return xeXamDispatchHeadless(
         [device_id_ptr, devices]() -> X_RESULT {
-          if (devices.empty()) return X_ERROR_CANCELLED;
+          if (devices.empty()) {
+            return X_ERROR_CANCELLED;
+          }
 
           const DummyDeviceInfo* device_info = devices.front();
           *device_id_ptr = static_cast<uint32_t>(device_info->device_id);
@@ -535,12 +659,20 @@ dword_result_t XamShowDeviceSelectorUI_entry(
 
   auto close = [device_id_ptr, devices](MessageBoxDialog* dialog) -> X_RESULT {
     uint32_t button = dialog->chosen_button();
-    if (button >= devices.size()) return X_ERROR_CANCELLED;
+    if (button >= devices.size()) {
+      return X_ERROR_CANCELLED;
+    }
 
     const DummyDeviceInfo* device_info = devices.at(button);
     *device_id_ptr = static_cast<uint32_t>(device_info->device_id);
     return X_ERROR_SUCCESS;
   };
+
+  if (kernel_state()->xam_state()->IsUIActive()) {
+    return X_ERROR_ACCESS_DENIED;
+  }
+
+  kernel_state()->xam_state()->is_xam_dialog_present_.store(true);
 
   std::string title = "Select storage device";
   std::string desc = "";
@@ -635,6 +767,12 @@ dword_result_t XamShowMarketplaceUIEx_entry(dword_t user_index, dword_t ui_type,
   if (cvars::headless) {
     return xeXamDispatchHeadlessAsync([]() {});
   }
+
+  if (kernel_state()->xam_state()->IsUIActive()) {
+    return X_ERROR_ACCESS_DENIED;
+  }
+
+  kernel_state()->xam_state()->is_xam_dialog_present_.store(true);
 
   bool is_xbla_unlock_offer =
       (offer_id == ((uint64_t(kernel_state()->title_id()) << 32) | 1ull));
@@ -739,18 +877,19 @@ dword_result_t XamShowMarketplaceUIEx_entry(dword_t user_index, dword_t ui_type,
       }
       break;
   }
+
 #if XE_PLATFORM_AX360E
   if (ui_type == 1 && is_xbla_unlock_offer) {
     cvars::license_mask = 1;
   }
   kernel_state()->BroadcastNotification(kXNotificationLiveContentInstalled, 0);
   return X_ERROR_SUCCESS;
-#else
+#endif
+
   const Emulator* emulator = kernel_state()->emulator();
   xe::ui::ImGuiDrawer* imgui_drawer = emulator->imgui_drawer();
   return xeXamDispatchDialogAsync<MessageBoxDialog>(
       new MessageBoxDialog(imgui_drawer, title, desc, buttons, 0), close);
-#endif
 }
 DECLARE_XAM_EXPORT1(XamShowMarketplaceUIEx, kUI, kSketchy);
 
@@ -789,6 +928,12 @@ dword_result_t XamShowMarketplaceDownloadItemsUI_entry(
         },
         overlapped);
   }
+
+  if (kernel_state()->xam_state()->IsUIActive()) {
+    return X_ERROR_ACCESS_DENIED;
+  }
+
+  kernel_state()->xam_state()->is_xam_dialog_present_.store(true);
 
   auto close = [hresult_ptr](MessageBoxDialog* dialog) -> X_RESULT {
     if (hresult_ptr) {
@@ -918,13 +1063,21 @@ X_RESULT xeXamShowSigninUI(uint32_t user_index, uint32_t users_needed,
         UserProfile* profile = kernel_state()->xam_state()->GetUserProfile(i);
         if (profile) {
           xuids[i] = profile->xuid();
-          if (xuids.size() >= users_needed) break;
+          if (xuids.size() >= users_needed) {
+            break;
+          }
         }
       }
 
       kernel_state()->xam_state()->profile_manager()->LoginMultiple(xuids);
     });
   }
+
+  if (kernel_state()->xam_state()->IsUIActive()) {
+    return X_ERROR_ACCESS_DENIED;
+  }
+
+  kernel_state()->xam_state()->is_xam_dialog_present_.store(true);
 
   auto close = [](ui::SigninUI* dialog) -> void {};
 
@@ -945,6 +1098,12 @@ X_RESULT xeXamShowCreateProfileUIEx(uint32_t user_index, dword_t flag,
   if (cvars::headless) {
     return X_ERROR_SUCCESS;
   }
+
+  if (kernel_state()->xam_state()->IsUIActive()) {
+    return X_ERROR_ACCESS_DENIED;
+  }
+
+  kernel_state()->xam_state()->is_xam_dialog_present_.store(true);
 
   auto close = [](ui::CreateProfileUI* dialog) -> void {};
 

@@ -1,6 +1,5 @@
 [APU]
 apu = "aaudio"                                    	# Audio system. Use: [any, nop, opensles, aaudio]
-apu_max_queued_frames = 8                         	# Allows changing max buffered audio frames to reduce audio delay. Lowering this value might cause performance issues. Value range: [4-64]
 enable_xmp = true                                 	# Enables Music Player playback.
 ffmpeg_verbose = false                            	# Verbose FFmpeg output (debug and above)
 mute = false                                      	# Mutes all audio output.
@@ -15,8 +14,6 @@ xma_decoder = "old"                               	# Decoder version used to pro
                                                   	#   Decoder based on master version of decoder with few improvements.
                                                   	#  new: 
                                                   	#   New version of decoder. Provides highest stability, but isn't yet finished.
-
-xmp_default_volume = 70                           	# Default music volume if game doesn't set it [0-100].
 
 
 [CPU]
@@ -72,7 +69,7 @@ defaults_date = 2026040912                        	# Do not modify - internal ve
 
 
 [Content]
-license_mask = 0                                  	# Set license mask for activated content.
+license_mask = -1                                  	# Set license mask for activated content.
                                                   	#  0 = No licenses enabled.
                                                   	#  1 = First license enabled. Generally the full version license in
                                                   	#      Xbox Live Arcade titles.
@@ -124,7 +121,20 @@ present_safe_area_y = 100                         	# Percentage of the image hei
 
 
 [GPU]
+anisotropic_override = -1                         	# Forces anisotropic filtering (AF) for eligible textures.
+                                                  	# Higher values keep textures sharper at oblique angles at the cost of GPU bandwidth, though most GPUs handle up to 16x fine.
+                                                  	# In rare cases, forcing AF can introduce visual artifacts.
+                                                  	#  -1 = No override
+                                                  	#   0 = Disable anisotropic filtering
+                                                  	#   1 = Force 1x anisotropic filtering
+                                                  	#   2 = Force 2x anisotropic filtering
+                                                  	#   3 = Force 4x anisotropic filtering
+                                                  	#   4 = Force 8x anisotropic filtering
+                                                  	#   5 = Force 16x anisotropic filtering
+
+async_shader_compilation = true                   	# Compile shaders and create pipelines asynchronously in background threads. Eliminates shader compilation stutter but may cause brief rendering artifacts while pipelines are being created. When disabled, pipelines are created synchronously which causes stutter but no visual artifacts.
 clear_memory_page_state = false                   	# Refresh state of memory pages to enable gpu written data. (Use for 'Team Ninja' Games to fix missing character models)
+depth_bias_shader_offset = false                  	# Route decal host render target draws with polygon offset through shader depth. This avoids Z-fighting in games that rely on tiny depth bias values that host fixed function depth bias cannot reproduce reliably.This likely causes some minor performance penalty, but the cost should be minimal if only a small portion of the scene is affected.
 depth_float24_convert_in_pixel_shader = false     	# Whether to convert the depth values to 24-bit floating-point (20e4) from the host precision (32-bit floating point) directly in the pixel shaders of guest draws when using a host depth buffer.
                                                   	# This prevents visual artifacts (interleaved stripes of parts of surfaces rendered and parts not rendered, having either the same width in case of the "greater or equal" depth test function, or the former being much thinner than the latter with the "equal" function) if the full host precision depth data is lost.
                                                   	# This issue may happen if the game reloads the depth data previously evicted from the EDRAM to the RAM back to the EDRAM, but the EDRAM region that previously contained that depth buffer was overwritten by another depth buffer, or the game loads it to a different location in the EDRAM than it was previously placed at, thus Xenia is unable to restore the depth data with the original precision, and instead falls back to converting the lower-precision values, so in subsequent rendering passes for the same geometry, the actual depth values of the surfaces don't match those stored in the depth buffer anymore.
@@ -157,8 +167,12 @@ depth_transfer_not_equal_test = true              	# When transferring data betw
                                                   	# Settings this to true may make transfer round trips more friendly to depth compression depending on how the GPU implements it (as arbitrary depth output may result in it being disabled completely), which is beneficial to subsequent rendering, while setting this to false may reduce bandwidth usage during transfers as the previous depth won't need to be read.
 
 disassemble_pm4 = false                           	# Only does anything in debug builds, if set will disassemble and log all PM4 packets sent to the CP.
+draw_resolution_scale_threshold = 0               	# Surface pitch in pixels at or below render targets skip being upscaled by draw_resolution_scale_x/y. 0 disables it.
+                                                  	# Small offscreen surfaces like bloom or depth of field buffers often break when upscaled and keeping them native avoids that. The pitch is compared after alignment to 80 pixel EDRAM tiles, so prefer conservative values, only as high as the broken effects need.
+                                                  	# Host render targets only.
+
 draw_resolution_scale_x = 1                       	# Integer pixel width scale used for scaling the rendering resolution opaquely to the game.
-                                                  	# 1, 2 and 3 may be supported, but support of anything above 1 depends on the device properties, such as whether it supports sparse binding / tiled resources, the number of virtual address bits per resource, and other factors.
+                                                  	# Values from 1 to 7 may be supported, depending on device capabilities. Requires sparse binding (Vulkan) or tiled resources (D3D12) for scales above 1x1. The emulator will automatically clamp to the maximum supported scale if the requested value exceeds device limits.
                                                   	# Various effects and parts of game rendering pipelines may work incorrectly as pixels become ambiguous from the game's perspective and because half-pixel offset (which normally doesn't affect coverage when MSAA isn't used) becomes full-pixel.
 
 draw_resolution_scale_y = 1                       	# Integer pixel width scale used for scaling the rendering resolution opaquely to the game.
@@ -181,11 +195,17 @@ force_convert_quad_lists_to_triangle_lists = false	# For host graphics API downl
                                                   	# May also be useful for graphics debugging when the debugger doesn't display the geometry generated by geometry shaders properly.
 
 force_convert_triangle_fans_to_lists = false      	# For host graphics API downlevel support testing only, force CPU conversion of triangle fans to triangle lists even if the host supports triangle fan primitives natively.
+force_depth_clamp = false                         	# Use host depth clamping instead of near and far plane clipping when guest clipping is enabled. X/Y/W clipping is unaffected. On Vulkan, this requires depthClamp support.
 framerate_limit = 0                               	# Maximum frames per second. 0 = Unlimited frames.
                                                   	# Defaults to 60, when set to 0, and VSYNC is enabled.
 
-gamma_render_target_as_srgb = false               	# When the host can't write piecewise linear gamma directly with correct blending, use sRGB output on the host for conceptually correct blending in linear color space while having slightly different precision distribution in the render target and severely incorrect values if the game accesses the resulting colors directly as raw data.
+gamma_decode_pwl_resolve = true                   	# During 8_8_8_8_GAMMA MSAA color resolves, average the samples in linear space instead of averaging the encoded PWL gamma values directly.
+                                                  	# This is separate from gamma_render_target_as_unorm16. It only applies when a full shader resolve reads an 8_8_8_8_GAMMA EDRAM color source. Compatible 8_8_8_8 destinations are written back as PWL gamma.
+                                                  	# Leave enabled for games that otherwise look overexposed after gamma MSAA resolves. Disable only if it causes a title-specific regression.
+
+gamma_render_target_as_unorm16 = true             	# When the host can't write 8 bits per component pixels with piecewise linear gamma encoding directly with correct blending, use the 16-bit unsigned normalized format, if supported, for conceptually correct 8_8_8_8_GAMMA render target format blending in linear color space. Greatly increases accuracy for this format, but may result in render target copying costs if the game switches between 8_8_8_8_GAMMA and 8_8_8_8 views for the same EDRAM render target.
 gpu = "vulkan"                                    	# Graphics system. Use: [vulkan, null]
+gpu_3d_to_2d_texture = true                       	# Handle shaders that sample 3D textures as 2D by creating a 2D texture from slice 0 of the guest memory.
 gpu_allow_invalid_fetch_constants = true          	# Allow texture and vertex fetch constants with invalid type - generally unsafe because the constant may contain completely invalid values, but may be used to bypass fetch constant type errors in certain games until the real reason why they're invalid is found.
 gpu_allow_invalid_upload_range = false            	# Allows games to read data from pages that are marked as no access.
 half_pixel_offset = true                          	# Enable support of vertex half-pixel offset (D3D9 PA_SU_VTX_CNTL PIX_CENTER). Generally games are aware of the half-pixel offset, and having this enabled is the correct behavior (disabling this may significantly break post-processing in some games), but in certain games it might have been ignored, resulting in slight blurriness of UI textures, for instance, when they are read between texels rather than at texel centers, or the leftmost/topmost pixels may not be fully covered when MSAA is used with fullscreen passes.
@@ -198,18 +218,52 @@ mrt_edram_used_range_clamp_to_min = true          	# With host render targets, i
 
 native_2x_msaa = true                             	# Use host 2x MSAA when available. Can be disabled for scalability testing on host GPU APIs where 2x is not mandatory, in this case, 2 samples of 4x MSAA will be used instead (with similar or worse quality and higher memory usage).
 native_stencil_value_output = true                	# Use pixel shader stencil reference output where available for purposes like copying between render targets. Can be disabled for scalability testing, in this case, much more expensive drawing of 8 quads will be done.
+no_discard_stencil_in_transfer_pipelines = false  	# Skip stencil bit discard in render target transfer pipelines. May improve performance on some GPUs.
 non_seamless_cube_map = true                      	# Disable filtering between cube map faces near edges where possible (Vulkan with VK_EXT_non_seamless_cube_map) to reproduce the Direct3D 9 behavior.
+occlusion_query = "fast"                          	# Controls hardware occlusion query behavior for EVENT_WRITE_ZPD.
+                                                  	# Used for effects like lens flares, object culling, and auto-exposure.
+                                                  	#  fake: Write a fake result without asking the GPU. Safe for most games,
+                                                  	#        though some effects may look slightly wrong.
+                                                  	#  fast: Ask the GPU but don't wait for the answer. Writes a cached
+                                                  	#        result immediately and updates it when the GPU catches up.
+                                                  	#        Cached results bias toward visible when guessing. (default)
+                                                  	#  fast-alt: Variant of fast mode that keeps cached zero results for
+                                                  	#            unresolved reports. May improve effects relying on precise
+                                                  	#            visibility, but may be less stable for occlusion culling.
+                                                  	#  strict: Ask the GPU and wait for the real result before continuing.
+                                                  	#          Most accurate, but may be somewhat less performant.
+
+occlusion_query_fake_lower_threshold = 80         	# Lower end of the fake sample count value written on EVENT_WRITE_ZPD when real occlusion queries are disabled.
+                                                  	# -1 writes nothing, resulting in some games that sit and hang.
+                                                  	# 0 means the fake result stays fully occluded.
+
+occlusion_query_fake_upper_threshold = 100        	# Upper end of the fake sample count value written on EVENT_WRITE_ZPD when real occlusion queries are disabled.
+                                                  	# Keep this higher than occlusion_query_fake_lower_threshold.
+                                                  	# Ignored if occlusion_query_fake_lower_threshold is -1.
+
+occlusion_query_querybatch_range = 0              	# Range of fake sample count values to walk for titles using the D3D QueryBatch standard before wrapping back to occlusion_query_fake_lower_threshold.
+                                                  	# This shouldn't be changed from the default value of 0 (disabled) unless necessary for a specific title.
+
+occlusion_query_saturation = 1                    	# Compress higher occlusion query sample counts before guest writeback.
+                                                  	# This can be useful if effects such as lens flares appear too strong.
+                                                  	# 1.0 = default behavior
+                                                  	# 0.0 = collapse all nonzero sample counts to 1
+                                                  	# Values around 0.90 are a good starting point for subtle tuning.
+
 primitive_processor_cache_min_indices = 4096      	# Smallest number of guest indices to store in the cache to try reusing later in the same frame if processing (such as primitive type conversion or reset index replacement) is performed.
                                                   	# Setting this to a very high value may result in excessive CPU processing, while a very low value may result in excessive locking and lookups.
                                                   	# Negative values disable caching.
 
-query_occlusion_sample_lower_threshold = 80       	# If set to -1 no sample counts are written, games may hang. Else, the sample count of every tile will be incremented on every EVENT_WRITE_ZPD by this number. Setting this to 0 means everything is reported as occluded.
-query_occlusion_sample_upper_threshold = 100      	# Set to higher number than query_occlusion_sample_lower_threshold. This value is ignored if query_occlusion_sample_lower_threshold is set to -1.
 readback_memexport = false                        	# Read data written by memory export in shaders on the CPU. This may be needed in some games (but many only access exported data on the GPU, and this flag isn't needed to handle such behavior), but causes mid-frame synchronization, so it has a huge performance impact.
 readback_resolve = "none"                         	# Controls CPU readback of render-to-texture resolve results.
                                                   	#  fast: Read from previous frame (1 frame delay, no GPU stall, slight performance hit)
                                                   	#  full: Wait for GPU to finish (accurate but slow, GPU-CPU sync stall)
                                                   	#  none: Disable readback completely (some games render better without it)
+
+readback_resolve_half_pixel_offset = false        	# When resolution scaling and readback resolve are enabled, resolve downscaling keeps one supersample out of each scaled pixel block.
+                                                  	# This selects the center of the block instead of the top-left corner, which can be closer to where the GPU would have sampled the original pixel, and can help with thin features and edge coverage.
+                                                  	# Both choices give a real rendered value, but they can disagree where geometry edges fall inside a pixel block.
+                                                  	# This matters when the CPU reads the resolve as data instead of an image, such as for gamma correction readbacks, occlusion checks, and GPU buffers reused later in the frame.
 
 render_target_path_vulkan = ""                    	# Render target emulation path to use on Vulkan.
                                                   	# Use: [any, fbo, fsi]
@@ -225,6 +279,9 @@ render_target_path_vulkan = ""                    	# Render target emulation pat
                                                   	#  Any other value:
                                                   	#   Choose what is considered the most optimal for the system (currently always FB because the FSI path is much slower now).
 
+resolve_check_number_format = true                	# Require the destination number format to match before using fast color resolves.
+                                                  	# Fast resolves copy the exact EDRAM bits. If a title resolves unsigned color data to a signed or integer destination, enabling this forces full resolves in the shader so the destination gets repacked instead.
+
 resolve_resolution_scale_fill_half_pixel_offset = true	# When using resolution scaling, apply the hack that stretches the first surely covered host pixel in the left and top sides of render target resolve areas to eliminate the gap caused by the half-pixel offset (this is necessary for certain games to display the scene graphics).
 snorm16_render_target_full_range = true           	# When the host can only support 16_16 and 16_16_16_16 render targets as -1...1, remap -32...32 to -1...1 to use the full possible range of values, at the expense of multiplicative blending correctness.
 store_shaders = true                              	# Store shaders persistently and load them when loading games to avoid runtime spikes and freezes when playing the game not for the first time.
@@ -235,6 +292,7 @@ texture_cache_memory_limit_render_to_texture = 24 	# Part of the host texture me
 
 texture_cache_memory_limit_soft = 384             	# Maximum host texture memory usage (in megabytes) above which old textures will be destroyed.
 texture_cache_memory_limit_soft_lifetime = 30     	# Seconds a texture should be unused to be considered old enough to be deleted if texture memory usage exceeds texture_cache_memory_limit_soft.
+tiled_shared_memory = true                        	# Enable tiled/sparse resources for efficient large address space support. Disable for graphics debugger compatibility.
 trace_dump_path = ""                              	# Output path for dumped files.
 trace_gpu_prefix = "scratch/gpu/"                 	# Prefix path for GPU trace files.
 trace_gpu_stream = false                          	# Trace all GPU packets.
@@ -256,6 +314,10 @@ recent_titles_entry_amount = 10                   	# Allows user to define how m
 time_scalar = 1                                   	# Scalar used to speed or slow time (1x, 2x, 1/2x, etc).
 
 
+[HACKS]
+ac6_ground_fix = false                            	# This fixes(hide) issues with black ground in AC6. Use only in AC6. Might cause issues in other titles.
+
+
 [HID]
 guide_button = true                               	# Forward guide button presses to guest.
 hid = "android"                                   	# Input system. Use: [android, nop]
@@ -266,17 +328,12 @@ vibration = true                                  	# Toggle controller vibration
 
 [Kernel]
 allow_avatar_initialization = false               	# Enable Avatar Initialization
-                                                  	#  Only set true when testing Avatar games. Certain games may
-                                                  	#  require kinect implementation.
+                                                  	# Only set true when testing Avatar games. Certain games may crash due to requirement of full avatar implementation.
 
 allow_incompatible_title_update = true            	# Allow title updates with mismatched signatures to be applied.
-allow_nui_initialization = false                  	# Enable NUI initialization
-                                                  	#  Only set true when testing kinect games. Certain games may
-                                                  	#  require avatar implementation.
-
 apply_title_update = true                         	# Apply title updates.
 cl = ""                                           	# Specify additional command-line provided to guest.
-console_type = 0                                  	# Console Type Identifier: 0 - Development Kit, 1 - Test Kit
+console_type = -1                                 	# Console Type Identifier: -1 - Retail, 0 - Development Kit, 1 - Test Kit
 default_achievements_backend = "GPD"              	# Defines which achievements backend should be used as an default. Possible options: GPD.
 ignore_thread_affinities = true                   	# Ignores game-specified thread affinities.
 ignore_thread_priorities = false                  	# Ignores game-specified thread priorities.
@@ -286,23 +343,23 @@ kernel_debug_monitor = false                      	# Enable debug monitor.
 kernel_display_gamma_power = 2.22222233           	# Display gamma to use with kernel_display_gamma_type 3.
 kernel_display_gamma_type = 2                     	# Display gamma type: 0 - linear, 1 - sRGB (CRT), 2 - BT.709 (HDTV), 3 - power specified via kernel_display_gamma_power.
 kernel_pix = false                                	# Enable PIX.
-log_high_frequency_kernel_calls = false           	# Log kernel calls with the kHighFrequency tag.
 staging_mode = false                              	# Enables preview mode in dashboards to render debug information.
 
 
 [Logging]
 flush_log = true                                  	# Flush log file after each log line batch.
 log_file = ""                                     	# Logs are written to the given file
+log_high_frequency_kernel_calls = false           	# Log kernel calls with the kHighFrequency tag.
 log_level = 2                                     	# Maximum level to be logged. (0=error, 1=warning, 2=info, 3=debug)
 log_mask = 0                                      	# Disables specific categorizes for more granular debug logging. Kernel = 1, Apu = 2, Cpu = 4, Gpu = 8.
-log_string_format_kernel_calls = false            	# Log kernel calls with the kHighFrequency tag.
+log_string_format_kernel_calls = false            	# Log usage of print formatters like sprintf.
 log_to_debugprint = false                         	# Dump the log to DebugPrint.
 log_to_stdout = true                              	# Write log output to stdout
 
 
 [Memory]
 ignore_offset_for_ranged_allocations = false      	# Allows to ignore 4k offset for physical allocations with provided range. Certain titles check if result matches provided lower range.
-mmap_address_high = 8                             	# 1-124
+mmap_address_high = 8                             	# 1-60
 protect_on_release = false                        	# Protect released memory to prevent accesses.
 protect_zero = true                               	# Protect the zero page from reads and writes.
 scribble_heap = false                             	# Scribble specific or random value into all allocated heap memory.
@@ -329,12 +386,16 @@ storage_root = ""                                 	# Root path for persistent in
 
 [UI]
 custom_font_path = ""                             	# Allows user to load custom font and use it instead of default one.
-font_size = 14                                    	# Allows user to set custom font size.
-headless = true                                   	# Don't display any UI, using defaults for prompts as needed.
+font_size = 30                                    	# Allows user to set custom font size.
+fps_overlay_position = 0                          	# Position of the FPS overlay: 0 = top-left, 1 = top-right, 2 = bottom-left, 3 = bottom-right.
+headless = false                                  	# Don't display any UI, using defaults for prompts as needed.
 profiler_dpi_scaling = false                      	# Apply window DPI scaling to the profiler.
 show_achievement_notification = false             	# Show achievement notification on screen.
+show_fps_overlay = false                          	# Show a frame rate overlay drawn with ImGui.
 show_profiler = false                             	# Show profiling UI by default.
 storage_selection_dialog = false                  	# Show storage device selection dialog when the game requests it.
+window_size_x = 1280                              	# Xenia window width
+window_size_y = 720                               	# Xenia window height
 
 
 [Video]
@@ -349,39 +410,11 @@ avpack = 8                                        	# Video modes
                                                   	#  7 = TV PAL-60
                                                   	#  8 = HDMI (default)
 
+custom_internal_display_resolution_x = 0          	# Custom width. See internal_display_resolution. Range 1-1920.
+custom_internal_display_resolution_y = 0          	# Custom height. See internal_display_resolution. Range 1-1080.
+
 enable_3d_mode = false                            	# Enables usage of stereoscopic mode in titles.
 interlaced = false                                	# Toggles interlaced mode.
-internal_display_resolution = 8                   	# Allow games that support different resolutions to render in a specific resolution.
-                                                  	# This is not guaranteed to work with all games or improve performance.
-                                                  	#    0=640x480
-                                                  	#    1=640x576
-                                                  	#    2=720x480
-                                                  	#    3=720x576
-                                                  	#    4=800x600
-                                                  	#    5=848x480
-                                                  	#    6=1024x768
-                                                  	#    7=1152x864
-                                                  	#    8=1280x720 (Default)
-                                                  	#    9=1280x768
-                                                  	#    10=1280x960
-                                                  	#    11=1280x1024
-                                                  	#    12=1360x768
-                                                  	#    13=1440x900
-                                                  	#    14=1680x1050
-                                                  	#    15=1920x540
-                                                  	#    16=1920x1080
-                                                  	#    17=internal_display_resolution_x/y
-
-internal_display_resolution_x = 1280              	# Custom width. See internal_display_resolution. Range 1-1920.
-internal_display_resolution_y = 720               	# Custom height. See internal_display_resolution. Range 1-1080.
-
-use_50Hz_mode = false                             	# Enables usage of PAL-50 mode.
-video_standard = 1                                	# Enables switching between different video signals.
-                                                  	#    1=NTSC
-                                                  	#    2=NTSC-J
-                                                  	#    3=PAL
-
-widescreen = true                                 	# Toggles between 16:9 and 4:3 aspect ratio.
 
 
 [Vulkan]
@@ -392,42 +425,10 @@ vulkan_allow_present_mode_mailbox = true          	# When available, allow the m
 vulkan_device = -1                                	# Index of the preferred Vulkan physical device, or -1 to use any compatible device.
 vulkan_lib_path = ""                              	# Custom Driver Library Path
 vulkan_log_debug_messages = true                  	# Write Vulkan VK_EXT_debug_utils messages to the Xenia log, as opposed to the OS debug output.
+vulkan_pipeline_creation_threads = -1             	# Number of threads used for graphics pipeline creation. -1 to calculate automatically (75% of logical CPU cores), a positive number to specify the number of threads explicitly (up to the number of logical CPU cores), 0 to disable multithreaded pipeline creation.
+vulkan_semaphore_reuse_workaround = false         	# Wait for presentation queue idle before each frame to prevent semaphore reuse. May fix rendering issues but causes significant performance loss.
 vulkan_sparse_shared_memory = true                	# Enable sparse binding for shared memory emulation. Disabling it increases video memory usage - a 512 MB buffer is created - but allows graphics debuggers that don't support sparse binding to work.
 vulkan_validation = false                         	# Enable the Vulkan validation layer (VK_LAYER_KHRONOS_validation). Messages will be written to the Xenia log if 'vulkan_log_debug_messages' is enabled, or to the OS debug output otherwise.
-
-
-[XConfig]
-audio_flag = 65537                                	# Audio Mode Analog.
-                                                  	#  0x00000001 = Dolby Pro Logic
-                                                  	#  0x00000002 = Analog Mono
-                                                  	# Audio Mode Digital.
-                                                  	#  0x00000000 = Digital Stereo (choose one of the above by itself)
-                                                  	#  0x00010000 = Dolby Digital
-                                                  	#  0x00030000 = Dolby Digital with WMA PRO
-                                                  	# Special Flags.
-                                                  	#  0x00000003 = Stereo Bypass
-                                                  	#  0x80000000 = Low Latency
-                                                  	#  This Config requires you to pair an analog and digitial flag together
-                                                  	#  while digital stereo only requires an analog flag. Bonus flags are
-                                                  	#  optional. Ex) 0x00010001
-
-user_country = 103                                	# User country ID.
-                                                  	#    1=AE   2=AL   3=AM   4=AR   5=AT   6=AU   7=AZ   8=BE   9=BG
-                                                  	#   10=BH  11=BN  12=BO  13=BR  14=BY  15=BZ  16=CA  18=CH  19=CL
-                                                  	#   20=CN  21=CO  22=CR  23=CZ  24=DE  25=DK  26=DO  27=DZ  28=EC
-                                                  	#   29=EE  30=EG  31=ES  32=FI  33=FO  34=FR  35=GB  36=GE  37=GR
-                                                  	#   38=GT  39=HK  40=HN  41=HR  42=HU  43=ID  44=IE  45=IL  46=IN
-                                                  	#   47=IQ  48=IR  49=IS  50=IT  51=JM  52=JO  53=JP  54=KE  55=KG
-                                                  	#   56=KR  57=KW  58=KZ  59=LB  60=LI  61=LT  62=LU  63=LV  64=LY
-                                                  	#   65=MA  66=MC  67=MK  68=MN  69=MO  70=MV  71=MX  72=MY  73=NI
-                                                  	#   74=NL  75=NO  76=NZ  77=OM  78=PA  79=PE  80=PH  81=PK  82=PL
-                                                  	#   83=PR  84=PT  85=PY  86=QA  87=RO  88=RU  89=SA  90=SE  91=SG
-                                                  	#   92=SI  93=SK  95=SV  96=SY  97=TH  98=TN  99=TR 100=TT 101=TW
-                                                  	#  102=UA 103=US 104=UY 105=UZ 106=VE 107=VN 108=YE 109=ZA
-
-user_language = 1                                 	# User language ID.
-                                                  	#   1=en  2=ja  3=de  4=fr  5=es  6=it  7=ko  8=zh
-                                                  	#   9=pt 11=pl 12=ru 13=sv 14=tr 15=nb 16=nl 17=zh
 
 
 [a64]

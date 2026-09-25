@@ -10,6 +10,8 @@
 #ifndef XENIA_KERNEL_XAM_XAM_UI_H_
 #define XENIA_KERNEL_XAM_XAM_UI_H_
 
+#include <functional>
+
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/ui/imgui_dialog.h"
 #include "xenia/ui/imgui_drawer.h"
@@ -17,6 +19,14 @@
 namespace xe {
 namespace kernel {
 namespace xam {
+
+#if XE_PLATFORM_AX360E
+// Hooks to the app-layer platform soft keyboard. Installed by the Android
+// app glue code; on platforms without a soft keyboard they stay null and the
+// keyboard input dialog falls back to the built-in ImGui text input.
+extern std::function<void(const std::string&)> soft_keyboard_show_hook;
+extern std::function<void()> soft_keyboard_hide_hook;
+#endif
 
 class XamDialog : public xe::ui::ImGuiDialog {
  public:
@@ -94,13 +104,25 @@ class KeyboardInputDialog : public XamDialog {
     xe::string_util::copy_truncating(text_buffer_.data(), default_text_,
                                      text_buffer_.size());
   }
-  virtual ~KeyboardInputDialog() {}
+  virtual ~KeyboardInputDialog();
 
   const std::string& text() const { return text_; }
   bool cancelled() const { return cancelled_; }
 
   void OnDraw(ImGuiIO& io) override;
+#if XE_PLATFORM_AX360E
+  // Soft keyboard integration: the dialog currently waiting for the platform
+  // IME result, and the entry point for forwarding that result to it (called
+  // on the UI thread). commit=true acts like pressing the OK button.
+  static KeyboardInputDialog* GetActiveTextInput() {
+    return active_text_input_;
+  }
+  void ApplyImeText(const std::string& text, bool commit);
 
+ protected:
+  void OnClose() override;
+
+#endif
  private:
   bool has_opened_ = false;
   std::string title_;
@@ -110,6 +132,17 @@ class KeyboardInputDialog : public XamDialog {
   std::vector<char> text_buffer_;
   std::string text_ = "";
   bool cancelled_ = true;
+  // ImGui item ID of the text input widget (from the previous frame) and the
+  // navigation focus ID from the previous frame - needed to detect A/B
+  // presses targeting the input field, because ImGui processes them inside
+  // NewFrame before OnDraw runs.
+  uint32_t input_item_id_ = 0;
+  uint32_t prev_nav_id_ = 0;
+  bool ime_commit_pending_ = false;
+
+#if XE_PLATFORM_AX360E
+  static KeyboardInputDialog* active_text_input_;
+#endif
 };
 
 bool xeDrawProfileContent(xe::ui::ImGuiDrawer* imgui_drawer,

@@ -45,6 +45,7 @@ static bool _fd_readBytes(int fd, uint64_t offset, void* buffer, uint32_t size)
 	return true;
 }
 #endif
+
 static uint64_t _getValidElementCount(uint64_t size, uint64_t elementSize)
 {
 	if ((size % elementSize) != 0)
@@ -176,6 +177,7 @@ ZArchiveReader* ZArchiveReader::OpenFromFile(int fd)
 	return cfs;
 }
 #endif
+
 ZArchiveReader::ZArchiveReader(std::ifstream&& file, std::vector<_ZARCHIVE::CompressionOffsetRecord>&& offsetRecords, std::vector<uint8_t>&& nameTable, std::vector<_ZARCHIVE::FileDirectoryEntry>&& fileTree, uint64_t compressedDataOffset, uint64_t compressedDataSize) :
 	m_file(std::move(file)), m_fd(-1), m_offsetRecords(std::move(offsetRecords)), m_nameTable(std::move(nameTable)), m_fileTree(std::move(fileTree)),
 	m_compressedDataOffset(compressedDataOffset), m_compressedDataSize(compressedDataSize)
@@ -202,7 +204,7 @@ ZArchiveReader::ZArchiveReader(std::ifstream&& file, std::vector<_ZARCHIVE::Comp
 	}
 	m_cacheBlocks.back().next = nullptr;
 }
-
+#ifndef _WIN32
 ZArchiveReader::ZArchiveReader(int fd, std::vector<_ZARCHIVE::CompressionOffsetRecord>&& offsetRecords, std::vector<uint8_t>&& nameTable, std::vector<_ZARCHIVE::FileDirectoryEntry>&& fileTree, uint64_t compressedDataOffset, uint64_t compressedDataSize) :
 	m_fd(fd), m_offsetRecords(std::move(offsetRecords)), m_nameTable(std::move(nameTable)), m_fileTree(std::move(fileTree)),
 	m_compressedDataOffset(compressedDataOffset), m_compressedDataSize(compressedDataSize)
@@ -229,6 +231,7 @@ ZArchiveReader::ZArchiveReader(int fd, std::vector<_ZARCHIVE::CompressionOffsetR
 	}
 	m_cacheBlocks.back().next = nullptr;
 }
+#endif
 
 ZArchiveReader::~ZArchiveReader()
 {
@@ -451,25 +454,23 @@ bool ZArchiveReader::LoadBlock(CacheBlock* block)
 	if (compressedSize == _ZARCHIVE::COMPRESSED_BLOCK_SIZE)
 	{
 		// uncompressed block, read directly into cached block
-		#ifndef _WIN32
+#ifndef _WIN32
 		if (m_fd >= 0)
 			return _fd_readBytes(m_fd, offset, block->data, compressedSize);
 		else
-			#endif
+#endif
 			return _ifstream_readBytes(m_file, offset, block->data, compressedSize);
 	}
-	#ifndef _WIN32
+#ifndef _WIN32
 	if (m_fd >= 0)
 	{
 		if (!_fd_readBytes(m_fd, offset, m_blockDecompressionBuffer.data(), compressedSize))
 			return false;
 	}
 	else
-		#endif
-	{
-		if (!_ifstream_readBytes(m_file, offset, m_blockDecompressionBuffer.data(), compressedSize))
-			return false;
-	}
+#endif
+	if (!_ifstream_readBytes(m_file, offset, m_blockDecompressionBuffer.data(), compressedSize))
+		return false;
 	// decompress
 	size_t outputSize = ZSTD_decompress(block->data, _ZARCHIVE::COMPRESSED_BLOCK_SIZE, m_blockDecompressionBuffer.data(), compressedSize);
 	return outputSize == _ZARCHIVE::COMPRESSED_BLOCK_SIZE;

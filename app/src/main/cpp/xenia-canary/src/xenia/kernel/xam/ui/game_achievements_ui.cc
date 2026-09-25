@@ -9,6 +9,10 @@
 
 #include "xenia/kernel/xam/ui/game_achievements_ui.h"
 
+// For ImGuiContext::NavId (the "nothing focused" indicator used for the
+// gamepad B-to-close behavior).
+#include "third_party/imgui/imgui_internal.h"
+
 namespace xe {
 namespace kernel {
 namespace xam {
@@ -124,13 +128,20 @@ std::string GameAchievementsUI::GetUnlockedTime(
 
 void GameAchievementsUI::DrawTitleAchievementInfo(
     ImGuiIO& io, const Achievement& achievement_entry) const {
-  const auto start_drawing_pos = ImGui::GetCursorPos();
-
-  ImGui::TableSetColumnIndex(0);
-
   const auto icon = GetIcon(achievement_entry);
+
+  // One focusable row: the Selectable provides gamepad navigation, focus
+  // highlight and auto-scroll; the actual content is drawn over it. The
+  // Selectable must be submitted after TableSetColumnIndex(0), otherwise it
+  // is drawn outside of any table cell with a broken (zero-width) nav rect.
+  ImGui::TableSetColumnIndex(0);
+  const float selectable_cursor_y = ImGui::GetCursorPosY();
+  ImGui::Selectable("##achievement_row", false,
+                    ImGuiSelectableFlags_SpanAllColumns,
+                    ImVec2(0.f, xe::ui::default_image_icon_size.y));
+  ImGui::SetCursorPosY(selectable_cursor_y);
   if (icon) {
-    ImGui::Image(reinterpret_cast<ImTextureID>(GetIcon(achievement_entry)),
+    ImGui::Image(reinterpret_cast<ImTextureID>(icon),
                  xe::ui::default_image_icon_size);
   } else {
     ImGui::Dummy(xe::ui::default_image_icon_size);
@@ -146,9 +157,6 @@ void GameAchievementsUI::DrawTitleAchievementInfo(
   ImGui::TextWrapped("%s",
                      GetAchievementDescription(achievement_entry).c_str());
   ImGui::PopTextWrapPos();
-
-  ImGui::SetCursorPosY(start_drawing_pos.y + xe::ui::default_image_icon_size.x -
-                       ImGui::GetTextLineHeight());
 
   if (achievement_entry.IsUnlocked()) {
     ImGui::Text("%s", GetUnlockedTime(achievement_entry).c_str());
@@ -198,16 +206,35 @@ void GameAchievementsUI::OnDraw(ImGuiIO& io) {
     return;
   }
 
+  // Gamepad B with nothing focused closes the window. With an item focused,
+  // B first backs out of the focus (standard ImGui behavior) - that press
+  // clears g.NavId inside NewFrame, before this code runs, so the press that
+  // just exited the focus is recognized by prev_nav_id_ still being set.
+  // Note: io.NavActive stays true the whole time the window is focused, so
+  // NavId == 0 is the proper "nothing focused" indicator here.
+  const ImGuiID current_nav_id = ImGui::GetCurrentContext()->NavId;
+  if (prev_nav_id_ == 0 && current_nav_id == 0 &&
+      ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) {
+    dialog_open = false;
+  }
+  prev_nav_id_ = current_nav_id;
+
   ImGui::Checkbox("Show locked achievements information", &show_locked_info_);
   ImGui::Separator();
 
   if (achievements_info_.empty()) {
     ImGui::TextUnformatted(fmt::format("No achievements data!").c_str());
   } else {
+    // The window itself scrolls (clamped by the size constraints); the
+    // gamepad navigation auto-scrolls to the focused row.
     if (ImGui::BeginTable("", 3, ImGuiTableFlags_BordersInnerH)) {
+      uint32_t row_index = 0;
       for (const auto& entry : achievements_info_) {
+        // Unique ID per row - every row uses the same Selectable label.
+        ImGui::PushID(static_cast<int>(row_index++));
         ImGui::TableNextRow(0, xe::ui::default_image_icon_size.y);
         DrawTitleAchievementInfo(io, entry);
+        ImGui::PopID();
       }
 
       ImGui::EndTable();

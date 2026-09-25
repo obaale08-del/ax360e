@@ -30,6 +30,7 @@
 #include "xenia/gpu/vulkan/vulkan_graphics_system.h"
 #include "xenia/hid/nop/nop_hid.h"
 #include "xenia/kernel/xam/xam_module.h"
+#include "xenia/kernel/xam/xam_ui.h"
 #include "xenia/vfs/devices/host_path_device.h"
 
 #include "emulator.h"
@@ -188,7 +189,7 @@ bool AndroidWindow::OpenImpl() {
         if (w > 0 && h > 0) {
             OnDesiredLogicalSizeUpdate(SizeToLogical(w), SizeToLogical(h));
             WindowDestructionReceiver destruction_receiver(this);
-            OnActualSizeUpdate(uint32_t(w), uint32_t(h), destruction_receiver);
+            OnActualSizeUpdate(uint32_t(w), uint32_t(h), WindowResizeAction::kManual, destruction_receiver);
         } else {
             XELOGW("Android window has invalid size: {}x{}", w, h);
         }
@@ -222,7 +223,7 @@ void AndroidWindow::UpdateSurface(){
         if (w > 0 && h > 0) {
             OnDesiredLogicalSizeUpdate(SizeToLogical(w), SizeToLogical(h));
             WindowDestructionReceiver destruction_receiver(this);
-            OnActualSizeUpdate(uint32_t(w), uint32_t(h), destruction_receiver);
+            OnActualSizeUpdate(uint32_t(w), uint32_t(h), WindowResizeAction::kManual, destruction_receiver);
             if (destruction_receiver.IsWindowDestroyedOrClosed()) {
                 return;
             }
@@ -316,7 +317,7 @@ bool EmulatorApp::OnInitialize() {
             std::make_unique<xe::Emulator>("", storage_root, content_root, cache_root);
 
     // Determine window size based on user setting.
-    auto res = xe::gpu::GraphicsSystem::GetInternalDisplayResolution();
+    // auto res = xe::gpu::GraphicsSystem::GetInternalDisplayResolution();
 
     // Main emulator display window.
     emu_window = xe::app::EmulatorWindow::Create(emu.get(), app_context(),
@@ -505,34 +506,12 @@ void EmulatorApp::emu_thr_main() {
                     return debug_window_.get();
                 });
     }*/
-#if 1
     emu->on_launch.AddListener([&](auto title_id, const auto& game_title) {
         XELOGI("on_launch {}",
                game_title.empty() ? "Unknown Title" : std::string(game_title));
-        app_context().CallInUIThread([this]() { emu_window->UpdateTitle(); });
+        //app_context().CallInUIThread([this]() { emu_window->UpdateTitle(); });
         emu_thr_event->Set();
     });
-#else
-    emu->on_launch.AddListener([&](auto title_id, const auto& game_title) {
-        /*nlohmann::json json;
-        if(std::filesystem::exists(g_uri_info_list_file_path)){
-            std::ifstream json_file(g_uri_info_list_file_path);
-            json = nlohmann::json::parse(json_file);
-            json_file.close();
-        }
-        if(!game_title.empty()){
-            nlohmann::json info;
-            info["name"] = game_title;
-
-            json[cvars::target.string()]=info;
-        }
-        std::ofstream json_file(g_uri_info_list_file_path);
-        json_file << json;
-        json_file.close();
-
-        emu_thr_event->Set();*/
-    });
-#endif
     emu->on_shader_storage_initialization.AddListener(
             [this](bool initializing) {
                 XELOGI("Shader storage initialization: {}", initializing);
@@ -612,7 +591,7 @@ void EmulatorApp::emu_thr_main() {
     if (xam) {
         xam->LoadLoaderData();
 
-        if (xam->loader_data().launch_data_present) {
+        if (!xam->loader_data().host_path.empty()) {
             const std::filesystem::path host_path = xam->loader_data().host_path;
             app_context().CallInUIThread([this, host_path]() {
                 return emu_window->RunTitle(host_path);
@@ -637,6 +616,9 @@ void EmulatorApp::emu_thr_main() {
 XE_DEFINE_WINDOWED_APP(ax36e,EmulatorApp::create);
 
 namespace ae{
+
+    void show_soft_keyboard(const std::string& initial_text);
+    void hide_soft_keyboard();
 
     int boot_type;
 
@@ -692,12 +674,20 @@ namespace ae{
         }();
         LOGW("new thr: %s",tid.c_str());
 
-        prctl(PR_SET_TIMERSLACK,1,0,0,0);
+        //prctl(PR_SET_TIMERSLACK,1,0,0,0);
 
         AndroidWindowedAppContext wnd_ctx;
         wnd_ctx.setup_ui_thr_id(std::this_thread::get_id());
         g_windowed_app=xe::ui::GetWindowedAppCreator()(wnd_ctx);
         g_windowed_app_ref=dynamic_cast<EmulatorApp*>(g_windowed_app.get());
+
+        // Connect the ImGui keyboard input dialog to the Android soft keyboard.
+        xe::kernel::xam::soft_keyboard_show_hook=[](const std::string& initial){
+            ae::show_soft_keyboard(initial);
+        };
+        xe::kernel::xam::soft_keyboard_hide_hook=[](){
+            ae::hide_soft_keyboard();
+        };
 
         std::vector<char*> args;
         args.push_back(NULL);
@@ -725,6 +715,56 @@ namespace ae{
             xe::hid::android::AndroidInputDriver* driver=reinterpret_cast<xe::hid::android::AndroidInputDriver*>(g_windowed_app_ref->emu->input_system()->drivers_[0].get());
             driver->OnKey(key_code,pressed,value);
         }
+    }
+
+    // ---- Soft keyboard bridge (Java IME <-> ImGui KeyboardInputDialog) ----
+
+    // Cached at JNI_OnLoad time: FindClass on threads attached later (like the
+    // emulator UI thread) cannot see app classes through the default loader.
+    static jclass g_class_EmulatorActivity=nullptr;
+    static jmethodID g_mid_show_soft_input=nullptr;
+    static jmethodID g_mid_hide_soft_input=nullptr;
+
+    static JNIEnv* get_jni_env(){
+        JNIEnv* env=nullptr;
+        if(g_jvm->GetEnv(reinterpret_cast<void**>(&env),JNI_VERSION_1_6)==JNI_EDETACHED){
+            // The emulator UI thread is a native thread; keep it attached.
+            g_jvm->AttachCurrentThread(&env,nullptr);
+        }
+        return env;
+    }
+
+    void show_soft_keyboard(const std::string& initial_text){
+        if(!g_class_EmulatorActivity||!g_mid_show_soft_input) return;
+        JNIEnv* env=get_jni_env();
+        if(!env) return;
+        jstring js=env->NewStringUTF(initial_text.c_str());
+        env->CallStaticVoidMethod(g_class_EmulatorActivity,g_mid_show_soft_input,js);
+        env->DeleteLocalRef(js);
+    }
+
+    void hide_soft_keyboard(){
+        if(!g_class_EmulatorActivity||!g_mid_hide_soft_input) return;
+        JNIEnv* env=get_jni_env();
+        if(!env) return;
+        env->CallStaticVoidMethod(g_class_EmulatorActivity,g_mid_hide_soft_input);
+    }
+
+    void set_activity_jni_cache(jclass cls,jmethodID show,jmethodID hide){
+        g_class_EmulatorActivity=cls;
+        g_mid_show_soft_input=show;
+        g_mid_hide_soft_input=hide;
+    }
+
+    void ime_input(const char* text,bool done){
+        if(!g_windowed_app) return;
+        std::string s=text?text:"";
+        // The dialog lives on the emulator UI thread; marshal there and
+        // re-check the receiver, the dialog may close in the meantime.
+        g_windowed_app->app_context().CallInUIThread([s,done](){
+            auto* dialog=xe::kernel::xam::KeyboardInputDialog::GetActiveTextInput();
+            if(dialog) dialog->ApplyImeText(s,done);
+        });
     }
     void surface_changed(){
         if(!g_windowed_app) return;
@@ -755,4 +795,21 @@ namespace ae{
     void init(){
     }
 
+}
+
+// Caches EmulatorActivity JNI references while the app class loader is still
+// reachable (called from JNI_OnLoad); must run before any attached native
+// thread tries to call back into the activity.
+int cache_ax360e_activity_jni(JNIEnv* env){
+    jclass cls=env->FindClass("aenu/ax360e/EmulatorActivity");
+    if(!cls) return JNI_ERR;
+    jclass gcls=(jclass)env->NewGlobalRef(cls);
+    jmethodID mid_show=env->GetStaticMethodID(gcls,"show_soft_input","(Ljava/lang/String;)V");
+    jmethodID mid_hide=env->GetStaticMethodID(gcls,"hide_soft_input","()V");
+    if(!mid_show||!mid_hide){
+        env->DeleteGlobalRef(gcls);
+        return JNI_ERR;
+    }
+    ae::set_activity_jni_cache(gcls,mid_show,mid_hide);
+    return JNI_OK;
 }

@@ -865,12 +865,13 @@ void X64Emitter::SetReturnAddress(uint64_t value) {
 }
 
 Xbyak::Reg64 X64Emitter::GetNativeParam(uint32_t param) {
-  if (param == 0)
+  if (param == 0) {
     return rdx;
-  else if (param == 1)
+  } else if (param == 1) {
     return r8;
-  else if (param == 2)
+  } else if (param == 2) {
     return r9;
+  }
 
   assert_always();
   return r9;
@@ -1112,6 +1113,8 @@ static const vec128_t xmm_consts[] = {
     /* XMMInt127              */ vec128i(0x7Fu),
     /* XMM2To32               */ vec128f(0x1.0p32f),
     /* XMMFloatInf */ vec128i(0x7f800000),
+    /* XMMDoubleInf */
+    vec128i(0x00000000u, 0x7FF00000u, 0x00000000u, 0x7FF00000u),
 
     /* XMMIntsToBytes*/
     v128_setr_bytes(0, 4, 8, 12, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,

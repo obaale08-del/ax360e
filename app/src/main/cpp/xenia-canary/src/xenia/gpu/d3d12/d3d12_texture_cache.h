@@ -59,6 +59,9 @@ class D3D12TextureCache final : public TextureCache {
       xenos::AnisoFilter aniso_filter : 3;  // 17
       uint32_t mip_min_level : 4;           // 21
       uint32_t mip_base_map : 1;            // 22
+      // Force the border color alpha to 1.0 (only meaningful with a border
+      // clamp mode).
+      uint32_t force_bc_w_to_max : 1;  // 23
       // Maximum mip level is in the texture resource itself, but mip_base_map
       // can be used to limit fetching to mip_min_level.
     };
@@ -126,10 +129,6 @@ class D3D12TextureCache final : public TextureCache {
   void WriteSampler(SamplerParameters parameters,
                     D3D12_CPU_DESCRIPTOR_HANDLE handle) const;
 
-  // Returns whether the actual scale is not smaller than the requested one.
-  static bool ClampDrawResolutionScaleToMaxSupported(
-      uint32_t& scale_x, uint32_t& scale_y,
-      const ui::d3d12::D3D12Provider& provider);
   // Ensures the tiles backing the range in the buffers are allocated.
   bool EnsureScaledResolveMemoryCommitted(
       uint32_t start_unscaled, uint32_t length_unscaled,
@@ -141,17 +140,34 @@ class D3D12TextureCache final : public TextureCache {
   bool MakeScaledResolveRangeCurrent(uint32_t start_unscaled,
                                      uint32_t length_unscaled,
                                      uint32_t length_scaled_alignment_log2 = 0);
-  // These functions create a view of the range specified in the last successful
-  // MakeScaledResolveRangeCurrent call because that function must be called
-  // before this.
-  void CreateCurrentScaledResolveRangeUintPow2SRV(
-      D3D12_CPU_DESCRIPTOR_HANDLE handle, uint32_t element_size_bytes_pow2);
-  void CreateCurrentScaledResolveRangeUintPow2UAV(
-      D3D12_CPU_DESCRIPTOR_HANDLE handle, uint32_t element_size_bytes_pow2);
+  // Returns the GPU address of the range specified in the last successful
+  // MakeScaledResolveRangeCurrent call.
+  D3D12_GPU_VIRTUAL_ADDRESS GetCurrentScaledResolveRangeGPUAddress() const;
   void TransitionCurrentScaledResolveRange(D3D12_RESOURCE_STATES new_state);
   void MarkCurrentScaledResolveRangeUAVWritesCommitNeeded() {
     assert_true(IsDrawResolutionScaled());
     GetCurrentScaledResolveBuffer().SetUAVBarrierPending();
+  }
+  // The range specified in the last successful MakeScaledResolveRangeCurrent
+  // call, in the scaled physical memory address space.
+  uint64_t GetCurrentScaledResolveRangeStartScaled() const {
+    assert_true(IsDrawResolutionScaled());
+    return scaled_resolve_current_range_start_scaled_;
+  }
+  uint64_t GetCurrentScaledResolveRangeLengthScaled() const {
+    assert_true(IsDrawResolutionScaled());
+    return scaled_resolve_current_range_length_scaled_;
+  }
+  // The resource of the buffer containing the current scaled resolve range,
+  // and the offset of the start of the buffer within the scaled physical
+  // memory address space (the buffer index is also its gigabyte offset).
+  ID3D12Resource* GetCurrentScaledResolveBufferResource() {
+    assert_true(IsDrawResolutionScaled());
+    return GetCurrentScaledResolveBuffer().resource();
+  }
+  uint64_t GetCurrentScaledResolveBufferBaseOffset() const {
+    assert_true(IsDrawResolutionScaled());
+    return uint64_t(GetCurrentScaledResolveBufferIndex()) << 30;
   }
 
   // Returns the ID3D12Resource of the front buffer texture (in
@@ -180,10 +196,10 @@ class D3D12TextureCache final : public TextureCache {
     LoadShaderIndex load_shader_signed;
 
     // Do NOT add integer DXGI formats to this - they are not filterable, can
-    // only be read with Load, not Sample! If any game is seen using num_format
-    // 1 for fixed-point formats (for floating-point, it's normally set to 1
-    // though), add a constant buffer containing multipliers for the
-    // textures and multiplication to the tfetch implementation.
+    // only be read with Load, not Sample! Games that fetch fixed-point formats
+    // are handled after sampling by scaling the normalized host value back to
+    // the guest integer range (see GetIntegerScaleBits). Keep these as
+    // sampled float/normalized views.
 
     // Whether the DXGI format, if not uncompressing the texture, consists of
     // blocks, thus copy regions must be aligned to block size (assuming it's
@@ -555,6 +571,7 @@ class D3D12TextureCache final : public TextureCache {
       struct {
         uint32_t is_signed : 1;
         uint32_t host_swizzle : 12;
+        uint32_t dimension : 2;
       };
 
       SRVDescriptorKey() : key(0) { static_assert_size(*this, sizeof(key)); }
@@ -572,9 +589,13 @@ class D3D12TextureCache final : public TextureCache {
       }
     };
 
+    ID3D12Resource* GetOrCreate3DAs2DResource(D3D12_RESOURCE_STATES end_state);
+
+    // track_usage: if false, texture won't participate in LRU cache eviction.
     explicit D3D12Texture(D3D12TextureCache& texture_cache,
                           const TextureKey& key, ID3D12Resource* resource,
-                          D3D12_RESOURCE_STATES resource_state);
+                          D3D12_RESOURCE_STATES resource_state,
+                          bool track_usage = true);
     ~D3D12Texture();
 
     ID3D12Resource* resource() const { return resource_.Get(); }
@@ -598,6 +619,10 @@ class D3D12TextureCache final : public TextureCache {
    private:
     Microsoft::WRL::ComPtr<ID3D12Resource> resource_;
     D3D12_RESOURCE_STATES resource_state_;
+
+    // Cached 2D view of the first slice, managed as a standalone texture
+    // object.
+    std::unique_ptr<D3D12Texture> texture_3d_as_2d_;
 
     // For bindful - indices in the non-shader-visible descriptor cache for
     // copying to the shader-visible heap (much faster than recreating, which,
@@ -721,7 +746,8 @@ class D3D12TextureCache final : public TextureCache {
       case xenos::FetchOpDimension::k1D:
       case xenos::FetchOpDimension::k2D:
         return resource_dimension == xenos::DataDimension::k1D ||
-               resource_dimension == xenos::DataDimension::k2DOrStacked;
+               resource_dimension == xenos::DataDimension::k2DOrStacked ||
+               resource_dimension == xenos::DataDimension::k3D;
       case xenos::FetchOpDimension::k3DOrStacked:
         return resource_dimension == xenos::DataDimension::k3D;
       case xenos::FetchOpDimension::kCube:
@@ -734,8 +760,9 @@ class D3D12TextureCache final : public TextureCache {
   // Returns the index of an existing of a newly created non-shader-visible
   // cached (for bindful) or a shader-visible global (for bindless) descriptor,
   // or UINT32_MAX if failed to create.
-  uint32_t FindOrCreateTextureDescriptor(D3D12Texture& texture, bool is_signed,
-                                         uint32_t host_swizzle);
+  uint32_t FindOrCreateTextureDescriptor(D3D12Texture& texture,
+                                         xenos::DataDimension dimension,
+                                         bool is_signed, uint32_t host_swizzle);
   void ReleaseTextureDescriptor(uint32_t descriptor_index);
   D3D12_CPU_DESCRIPTOR_HANDLE GetTextureDescriptorCPUHandle(
       uint32_t descriptor_index) const;

@@ -51,7 +51,7 @@ DEFINE_int32(scribble_heap_value, 0,
              "Valid range: [1-255]",
              "Memory");
 DEFINE_uint32(mmap_address_high,8,
-              "1-124",
+              "1-60",
               "Memory");
 namespace xe {
 uint32_t get_page_count(uint32_t value, uint32_t page_size) {
@@ -297,10 +297,11 @@ bool Memory::Initialize() {
   heaps_.vA0000000.Alloc(0x340000, 64 * 1024, kMemoryAllocationReserve,
                          kMemoryProtectNoAccess, true, &unk_phys_alloc);
 
-  uint32_t unknown_xex_range;  // Probably hypervisor?
+  // Allocate memory hypervisor and kernel would use
+  uint32_t hypervisor_range;
   heaps_.v80000000.Alloc(0x40000, 4 * 1024, kMemoryAllocationCommit,
                          kMemoryProtectRead | kMemoryProtectWrite, false,
-                         &unknown_xex_range);
+                         &hypervisor_range);
 
   // Value taken from 544307D5. Title explicitly access this address and this is
   // a value underneath it (It's constant between multiple runs)

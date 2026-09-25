@@ -59,14 +59,76 @@ DEFINE_bool(
     "when MSAA is used with fullscreen passes.",
     "GPU");
 
-DEFINE_int32(query_occlusion_sample_lower_threshold, 80,
-             "If set to -1 no sample counts are written, games may hang. Else, "
-             "the sample count of every tile will be incremented on every "
-             "EVENT_WRITE_ZPD by this number. Setting this to 0 means "
-             "everything is reported as occluded.",
+DEFINE_int32(occlusion_query_fake_lower_threshold, 80,
+             "Lower end of the fake sample count value written on "
+             "EVENT_WRITE_ZPD when real occlusion queries are disabled.\n"
+             "-1 writes nothing, resulting in some games that sit and hang.\n"
+             "0 means the fake result stays fully occluded.",
              "GPU");
-DEFINE_int32(
-    query_occlusion_sample_upper_threshold, 100,
-    "Set to higher number than query_occlusion_sample_lower_threshold. This "
-    "value is ignored if query_occlusion_sample_lower_threshold is set to -1.",
+DEFINE_int32(occlusion_query_fake_upper_threshold, 100,
+             "Upper end of the fake sample count value written on "
+             "EVENT_WRITE_ZPD when real occlusion queries are disabled.\n"
+             "Keep this higher than occlusion_query_fake_lower_threshold.\n"
+             "Ignored if occlusion_query_fake_lower_threshold is -1.",
+             "GPU");
+DEFINE_int32(occlusion_query_querybatch_range, 0,
+             "Range of fake sample count values to walk for titles using the "
+             "D3D QueryBatch standard before wrapping back to "
+             "occlusion_query_fake_lower_threshold.\n"
+             "This shouldn't be changed from the default value of 0 (disabled) "
+             "unless necessary for a specific title.",
+             "GPU");
+DEFINE_double(
+    occlusion_query_saturation, 1.0,
+    "Compress higher occlusion query sample counts before guest writeback.\n"
+    "This can be useful if effects such as lens flares appear too strong.\n"
+    "1.0 = default behavior\n"
+    "0.0 = collapse all nonzero sample counts to 1\n"
+    "Values around 0.90 are a good starting point for subtle tuning.",
+    "GPU");
+
+DEFINE_int32(anisotropic_override, -1,
+             "Forces anisotropic filtering (AF) for eligible textures.\n"
+             "Higher values keep textures sharper at oblique angles at the "
+             "cost of GPU bandwidth, though most GPUs handle up to 16x fine.\n"
+             "In rare cases, forcing AF can introduce visual artifacts.\n"
+             " -1 = No override\n"
+             "  0 = Disable anisotropic filtering\n"
+             "  1 = Force 1x anisotropic filtering\n"
+             "  2 = Force 2x anisotropic filtering\n"
+             "  3 = Force 4x anisotropic filtering\n"
+             "  4 = Force 8x anisotropic filtering\n"
+             "  5 = Force 16x anisotropic filtering",
+             "GPU");
+
+DEFINE_bool(no_discard_stencil_in_transfer_pipelines, false,
+            "Skip stencil bit discard in render target transfer pipelines. "
+            "May improve performance on some GPUs.",
+            "GPU");
+
+DEFINE_bool(gpu_3d_to_2d_texture, true,
+            "Handle shaders that sample 3D textures as 2D by creating a 2D "
+            "texture from slice 0 of the guest memory.",
+            "GPU");
+
+DEFINE_bool(
+    async_shader_compilation, true,
+    "Compile shaders and create pipelines asynchronously in background "
+    "threads. "
+    "Eliminates shader compilation stutter but may cause brief rendering "
+    "artifacts while pipelines are being created. When disabled, pipelines are "
+    "created synchronously which causes stutter but no visual artifacts.",
+    "GPU");
+
+DEFINE_bool(
+    ac6_ground_fix, false,
+    "This fixes(hide) issues with black ground in AC6. Use only in AC6. "
+    "Might cause issues in other titles.",
+    "HACKS");
+
+DEFINE_bool(
+    force_depth_clamp, false,
+    "Use host depth clamping instead of near and far plane clipping when "
+    "guest clipping is enabled. X/Y/W clipping is unaffected. On Vulkan, "
+    "this requires depthClamp support.",
     "GPU");

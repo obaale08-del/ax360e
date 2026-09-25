@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # Copyright (c) 2020 Google Inc.
 #
@@ -48,6 +48,24 @@ tokens substituted:
 -o is an optional flag for writing the output string to the given file. If
    ommitted then the string is printed to stdout.
 """
+
+try:
+    utc = datetime.timezone.utc
+except AttributeError:
+    # Python 2? In datetime.date.today().year? Yes.
+    class UTC(datetime.tzinfo):
+        ZERO = datetime.timedelta(0)
+
+        def utcoffset(self, dt):
+            return self.ZERO
+
+        def tzname(self, dt):
+            return "UTC"
+
+        def dst(self, dt):
+            return self.ZERO
+    utc = UTC()
+
 
 def mkdir_p(directory):
     """Make the directory, and all its ancestors as required.  Any of the
@@ -139,7 +157,7 @@ def describe(directory):
             # clock time with environment variable SOURCE_DATE_EPOCH
             # containing a (presumably) fixed timestamp.
             timestamp = int(os.environ.get('SOURCE_DATE_EPOCH', time.time()))
-            formatted = datetime.datetime.utcfromtimestamp(timestamp).isoformat()
+            formatted = datetime.datetime.fromtimestamp(timestamp, utc).isoformat()
             return 'unknown hash, {}'.format(formatted)
 
 def parse_args():
@@ -201,13 +219,13 @@ def main():
     software_version = deduce_software_version(directory)
     commit = describe(directory)
     output = template \
-        .replace("<major>", software_version["major"]) \
-        .replace("<minor>", software_version["minor"]) \
-        .replace("<patch>", software_version["patch"]) \
-        .replace("<flavor>", software_version["flavor"]) \
-        .replace("<-flavor>", software_version["-flavor"]) \
-        .replace("<date>", software_version["date"]) \
-        .replace("<commit>", commit)
+        .replace("@major@", software_version["major"]) \
+        .replace("@minor@", software_version["minor"]) \
+        .replace("@patch@", software_version["patch"]) \
+        .replace("@flavor@", software_version["flavor"]) \
+        .replace("@-flavor@", software_version["-flavor"]) \
+        .replace("@date@", software_version["date"]) \
+        .replace("@commit@", commit)
 
     if output_file is None:
         print(output)

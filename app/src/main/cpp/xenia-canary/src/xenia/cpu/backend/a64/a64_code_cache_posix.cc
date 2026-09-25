@@ -65,6 +65,14 @@ static _Unwind_Reason_Code __jit_personality(
 }
 #endif
 
+#if XE_PLATFORM_AX360E
+//-stdlib=libc++
+#define USE_LLVM_CXXABI 1
+#else
+//-stdlib=libstdc++
+#define USE_LLVM_CXXABI 0
+#endif
+
 namespace xe {
 namespace cpu {
 namespace backend {
@@ -102,6 +110,7 @@ static constexpr uint8_t kDW_CFA_advance_loc2 = 0x03;
 static constexpr uint8_t kDW_CFA_def_cfa = 0x0c;
 static constexpr uint8_t kDW_CFA_def_cfa_offset = 0x0e;
 static constexpr uint8_t kDW_CFA_nop = 0x00;
+
 static constexpr uint8_t kDW_CFA_offset_extended=0x05;
 // DWARF pointer encoding constants.s
 
@@ -115,7 +124,9 @@ static size_t WriteULEB128(uint8_t* p, uint64_t value) {
   do {
     uint8_t byte = value & 0x7F;
     value >>= 7;
-    if (value) byte |= 0x80;
+    if (value) {
+      byte |= 0x80;
+    }
     p[count++] = byte;
   } while (value);
   return count;
@@ -156,7 +167,7 @@ class PosixA64CodeCache : public A64CodeCache {
                              void* code_execute_address,
                              const EmitFunctionInfo& func_info);
 
-#if XE_PLATFORM_AX360E
+#if USE_LLVM_CXXABI
   static constexpr uint32_t kFrameOffset=36;
 #else
   static constexpr uint32_t kFrameOffset=0;
@@ -240,12 +251,12 @@ void PosixA64CodeCache::InitializeUnwindEntry(
 
   // Version = 1.
   *p++ = 1;
-#if !XE_PLATFORM_AX360E
+
+#if !USE_LLVM_CXXABI
   // Augmentation string "zR".
   *p++ = 'z';
   *p++ = 'R';
   *p++ = '\0';
-
 #else
   // Augmentation string "zPLR"
   *p++ = 'z';
@@ -254,6 +265,7 @@ void PosixA64CodeCache::InitializeUnwindEntry(
   *p++ = 'R';
   *p++ = '\0';
 #endif
+
   // Code alignment factor = 4 (ARM64 instructions are 4 bytes).
   p += WriteULEB128(p, 4);
 
@@ -263,7 +275,7 @@ void PosixA64CodeCache::InitializeUnwindEntry(
   // Return address register = x30 (LR).
   p += WriteULEB128(p, kDwarfRegLR);
 
-#if !XE_PLATFORM_AX360E
+#if !USE_LLVM_CXXABI
   // Augmentation data length = 1.
   p += WriteULEB128(p, 1);
 
@@ -290,6 +302,7 @@ void PosixA64CodeCache::InitializeUnwindEntry(
     // FDE pointer encoding: absolute, 8-byte (matches how we write pc_begin)
     *p++ = kDW_EH_PE_absptr | kDW_EH_PE_udata8;
 #endif
+
   // Initial instructions:
   // DW_CFA_def_cfa SP, 0 — at function entry, CFA = SP.
   *p++ = kDW_CFA_def_cfa;
@@ -315,7 +328,8 @@ void PosixA64CodeCache::InitializeUnwindEntry(
   // CIE pointer.
   *reinterpret_cast<uint32_t*>(p) = static_cast<uint32_t>(p - cie_start);
   p += 4;
-#if !XE_PLATFORM_AX360E
+
+#if !USE_LLVM_CXXABI
   // PC begin (pc-relative).
   uint8_t* pc_begin_execute_addr =
       unwind_execute_base + (p - unwind_entry_address);
@@ -407,8 +421,7 @@ void PosixA64CodeCache::InitializeUnwindEntry(
       // stp q10,q11 at sp+0x080: d10=sp+0x080, d11=sp+0x090
       // stp q12,q13 at sp+0x0A0: d12=sp+0x0A0, d13=sp+0x0B0
       // stp q14,q15 at sp+0x0C0: d14=sp+0x0C0, d15=sp+0x0D0
-
-#if XE_PLATFORM_AX360E
+#if USE_LLVM_CXXABI
         *p++ = kDW_CFA_offset_extended;
         *p++ = kDwarfRegD8;
         p += WriteULEB128(p, (cfa - 0x060) / 8);

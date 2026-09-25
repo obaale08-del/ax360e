@@ -16,6 +16,7 @@
 #include "third_party/imgui/imgui.h"
 #include "xenia/base/assert.h"
 #include "xenia/base/clock.h"
+#include "xenia/base/frame_stats.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/math.h"
 #include "xenia/ui/imgui_dialog.h"
@@ -46,6 +47,13 @@ DEFINE_path(
 DEFINE_uint32(font_size, 14, "Allows user to set custom font size.", "UI");
 UPDATE_from_uint32(font_size, 2024, 8, 31, 20, 12);
 
+DEFINE_bool(show_fps_overlay, false,
+            "Show a frame rate overlay drawn with ImGui.", "UI");
+DEFINE_int32(fps_overlay_position, 0,
+             "Position of the FPS overlay: 0 = top-left, 1 = top-right, "
+             "2 = bottom-left, 3 = bottom-right.",
+             "UI");
+
 namespace xe {
 namespace ui {
 
@@ -63,6 +71,11 @@ ImGuiDrawer::ImGuiDrawer(xe::ui::Window* window, size_t z_order)
 }
 
 ImGuiDrawer::~ImGuiDrawer() {
+  // Make sure the guest gets the gamepad input back if the drawer is
+  // destroyed while dialogs are still open.
+  if (input_system_) {
+    input_system_->SetUiInputHijack(false);
+  }
   SetPresenter(nullptr);
   if (!dialogs_.empty()) {
     window_->RemoveInputListener(this);
@@ -93,11 +106,10 @@ void ImGuiDrawer::AddDialog(ImGuiDialog* dialog) {
     // a dialog's Draw function, re-registering the ImGuiDrawer may result in
     // ImGui being drawn multiple times in the current frame.
     window_->AddInputListener(this, z_order_);
-    if (presenter_) {
-      presenter_->AddUIDrawerFromUIThread(this, z_order_);
-    }
+    AttachToPresenterIfNeeded();
   }
   dialogs_.push_back(dialog);
+  UpdateGamepadHijackState();
 }
 
 void ImGuiDrawer::RemoveDialog(ImGuiDialog* dialog) {
@@ -114,6 +126,7 @@ void ImGuiDrawer::RemoveDialog(ImGuiDialog* dialog) {
     }
   }
   dialogs_.erase(it);
+  UpdateGamepadHijackState();
   DetachIfLastWindowRemoved();
 }
 
@@ -125,9 +138,7 @@ void ImGuiDrawer::AddNotification(ImGuiNotification* dialog) {
     return;
   }
   if (notifications_.empty()) {
-    if (presenter_) {
-      presenter_->AddUIDrawerFromUIThread(this, z_order_);
-    }
+    AttachToPresenterIfNeeded();
   }
   notifications_.push_back(dialog);
 }
@@ -162,6 +173,7 @@ void ImGuiDrawer::Initialize() {
 
   auto& io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
   const float font_size = std::max((float)cvars::font_size, 8.f);
   const float title_font_size = font_size + 6.f;
@@ -242,6 +254,8 @@ void ImGuiDrawer::LoadInputSystem(hid::InputSystem* input_system) {
   }
 
   input_system_ = input_system;
+  // If dialogs are already open at this point, hijack the gamepad now.
+  UpdateGamepadHijackState();
 }
 
 void ImGuiDrawer::SetGuideButtonAction(std::function<void(uint8_t)> func) {
@@ -337,6 +351,7 @@ void ImGuiDrawer::SetupNotificationTextures() {
   }
 }
 
+// https://everythingfonts.com/unicode/maps
 static constexpr ImWchar font_glyph_ranges[] = {
     0x0020, 0x00FF,  // Basic Latin + Latin Supplement
     0x0100, 0x024F,  // Extended Latin
@@ -344,8 +359,13 @@ static constexpr ImWchar font_glyph_ranges[] = {
     0x0400, 0x04FF,  // Cyrillic
     0x2000, 0x206F,  // General Punctuation
     0x2070, 0x209F,  // Superscripts & Subscripts
+    0x20A0, 0x20CF,  // Currency Symbols
     0x2100, 0x214F,  // Letterlike Symbols
     0x2150, 0x218F,  // Number Forms
+    0x2500, 0x257F,  // Box Drawing
+    0x2580, 0x259F,  // Block Elements
+    0x25A0, 0x25FF,  // Geometric Shapes
+    0x2600, 0x26FF,  // Miscellaneous Symbols
     0,
 };
 
@@ -533,21 +553,44 @@ void ImGuiDrawer::SetupFontTexture() {
 }
 
 void ImGuiDrawer::SetPresenter(Presenter* new_presenter) {
-  if (presenter_) {
-    if (presenter_ == new_presenter) {
-      return;
-    }
-    if (!dialogs_.empty()) {
-      presenter_->RemoveUIDrawerFromUIThread(this);
-    }
-    ImGuiIO& io = GetIO();
+  if (presenter_ == new_presenter) {
+    return;
+  }
+  if (presenter_ && ui_drawer_attached_) {
+    presenter_->RemoveUIDrawerFromUIThread(this);
+    ui_drawer_attached_ = false;
   }
   presenter_ = new_presenter;
   if (presenter_) {
-    if (!dialogs_.empty()) {
-      presenter_->AddUIDrawerFromUIThread(this, z_order_);
-    }
+    AttachToPresenterIfNeeded();
   }
+}
+
+void ImGuiDrawer::AttachToPresenterIfNeeded() {
+  if (!presenter_ || ui_drawer_attached_) {
+    return;
+  }
+  if (dialogs_.empty() && notifications_.empty() &&
+      !cvars::show_fps_overlay) {
+    return;
+  }
+  presenter_->AddUIDrawerFromUIThread(this, z_order_);
+  ui_drawer_attached_ = true;
+}
+
+void ImGuiDrawer::DetachFromPresenterIfUnused() {
+  if (!ui_drawer_attached_) {
+    return;
+  }
+  // The FPS overlay keeps the drawer attached even without any dialogs or
+  // notifications.
+  if (!dialogs_.empty() || !notifications_.empty() || cvars::show_fps_overlay) {
+    return;
+  }
+  if (presenter_) {
+    presenter_->RemoveUIDrawerFromUIThread(this);
+  }
+  ui_drawer_attached_ = false;
 }
 
 void ImGuiDrawer::SetImmediateDrawer(ImmediateDrawer* new_immediate_drawer) {
@@ -557,7 +600,7 @@ void ImGuiDrawer::SetImmediateDrawer(ImmediateDrawer* new_immediate_drawer) {
   if (immediate_drawer_) {
     GetIO().Fonts->TexID = reinterpret_cast<ImTextureID>(nullptr);
     font_texture_.reset();
-
+    locked_achievement_icon_.reset();
     notification_icon_textures_.clear();
   }
   immediate_drawer_ = new_immediate_drawer;
@@ -588,7 +631,8 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
     return;
   }
 
-  if (dialogs_.empty() && notifications_.empty()) {
+  const bool draw_fps = cvars::show_fps_overlay;
+  if (dialogs_.empty() && notifications_.empty() && !draw_fps) {
     return;
   }
 
@@ -650,6 +694,10 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
     }
   }
 
+  if (draw_fps) {
+    DrawFpsOverlay(io);
+  }
+
   ImGui::Render();
   ImDrawData* draw_data = ImGui::GetDrawData();
   if (draw_data) {
@@ -665,7 +713,7 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
   // it now if needed.
   DetachIfLastWindowRemoved();
 
-  if (!dialogs_.empty() || !notifications_.empty()) {
+  if (!dialogs_.empty() || !notifications_.empty() || draw_fps) {
     // Repaint (and handle input) continuously if still active.
     presenter_->RequestUIPaintFromUIThread();
   }
@@ -905,15 +953,60 @@ void ImGuiDrawer::DetachIfLastWindowRemoved() {
   if (!dialogs_.empty() || !notifications_.empty() || IsDrawingDialogs()) {
     return;
   }
-  if (presenter_) {
-    presenter_->RemoveUIDrawerFromUIThread(this);
-  }
+  // The input listener is only active while dialogs are shown; the FPS
+  // overlay is display-only and must not consume any input.
   window_->RemoveInputListener(this);
   // Clear all input since no input will be received anymore, and when the
   // drawer becomes active again, it'd have an outdated input state otherwise
   // which will be persistent until new events actualize individual input
   // properties.
   ClearInput();
+  // Stays attached to the presenter if the FPS overlay is enabled.
+  DetachFromPresenterIfUnused();
+}
+
+void ImGuiDrawer::DrawFpsOverlay(ImGuiIO& io) {
+  // Guest frame stats recorded by the GPU command processor on each presented
+  // game frame - the real game frame rate, not the host UI repaint cadence.
+  float instant_ms, avg_ms, fps;
+  xe::GetFrameStats(instant_ms, avg_ms, fps);
+
+  constexpr float kPadding = 10.f;
+  ImVec2 pos;
+  ImVec2 pivot;
+  switch (cvars::fps_overlay_position) {
+    case 1:  // Top-right.
+      pos = ImVec2(io.DisplaySize.x - kPadding, kPadding);
+      pivot = ImVec2(1.f, 0.f);
+      break;
+    case 2:  // Bottom-left.
+      pos = ImVec2(kPadding, io.DisplaySize.y - kPadding);
+      pivot = ImVec2(0.f, 1.f);
+      break;
+    case 3:  // Bottom-right.
+      pos = ImVec2(io.DisplaySize.x - kPadding, io.DisplaySize.y - kPadding);
+      pivot = ImVec2(1.f, 1.f);
+      break;
+    default:  // Top-left.
+      pos = ImVec2(kPadding, kPadding);
+      pivot = ImVec2(0.f, 0.f);
+      break;
+  }
+  ImGui::SetNextWindowPos(pos, ImGuiCond_Always, pivot);
+  ImGui::SetNextWindowBgAlpha(0.4f);
+  if (ImGui::Begin("##fps_overlay", nullptr,
+                   ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
+                       ImGuiWindowFlags_AlwaysAutoResize |
+                       ImGuiWindowFlags_NoSavedSettings |
+                       ImGuiWindowFlags_NoNav |
+                       ImGuiWindowFlags_NoFocusOnAppearing)) {
+    if (fps > 0.f) {
+      ImGui::Text("FPS: %.1f (%.1f ms)", double(fps), double(avg_ms));
+    } else {
+      ImGui::Text("FPS: --");
+    }
+  }
+  ImGui::End();
 }
 
 void ImGuiDrawer::UpdateGamepads() {
@@ -949,7 +1042,10 @@ void ImGuiDrawer::UpdateGamepads() {
   uint8_t controller_to_poke = XUserIndexNone;
   hid::X_INPUT_STATE gamepad_state;
   for (uint8_t i = 0; i < XUserMaxUserCount; i++) {
-    if (input_system_->GetState(i, 1, &gamepad_state) == X_ERROR_SUCCESS) {
+    // Use the hijack-bypassing getter - while dialogs are open, the regular
+    // GetState returns a neutral state to the guest and would give the UI
+    // empty input as well.
+    if (input_system_->GetStateUi(i, 1, &gamepad_state) == X_ERROR_SUCCESS) {
       if (gamepad_state.gamepad.buttons != 0) {
         controller_to_poke = i;
         break;
@@ -1033,6 +1129,17 @@ void ImGuiDrawer::UpdateGamepads() {
              -hid::X_INPUT_GAMEPAD_LEFT_THUMB_DEADZONE, -32768);
 #undef MAP_BUTTON
 #undef MAP_ANALOG
+}
+
+void ImGuiDrawer::UpdateGamepadHijackState() {
+  if (!input_system_) {
+    return;
+  }
+  const bool hijack_needed = !dialogs_.empty();
+  if (input_system_->IsUiInputHijacked() != hijack_needed) {
+    XELOGI("ImGui gamepad input hijack {}", hijack_needed ? "enabled" : "disabled");
+    input_system_->SetUiInputHijack(hijack_needed);
+  }
 }
 
 }  // namespace ui

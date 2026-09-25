@@ -10,6 +10,7 @@
 #ifndef XENIA_UI_VULKAN_VULKAN_DEVICE_H_
 #define XENIA_UI_VULKAN_VULKAN_DEVICE_H_
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -117,6 +118,18 @@ class VulkanDevice {
 
     bool samplerMirrorClampToEdge = false;
 
+    // VK_KHR_uniform_buffer_standard_layout (#253, promoted to 1.2)
+
+    bool uniformBufferStandardLayout = false;
+
+    // VK_EXT_scalar_block_layout (#222, promoted to 1.2)
+
+    bool scalarBlockLayout = false;
+
+    // VK_EXT_host_query_reset (promoted to 1.2)
+
+    bool hostQueryReset = false;
+
     // VK_KHR_portability_subset (#164)
 
     bool constantAlphaColorBlendFactors = false;
@@ -149,6 +162,11 @@ class VulkanDevice {
     // VK_EXT_non_seamless_cube_map (#423)
 
     bool nonSeamlessCubeMap = false;
+
+    // VK_EXT_custom_border_color (#288)
+
+    bool customBorderColors = false;
+    bool customBorderColorWithoutFormat = false;
   };
 
   // Properties of the core API and enabled extensions, and enabled features.
@@ -172,8 +190,13 @@ class VulkanDevice {
     bool ext_1_1_KHR_bind_memory2 = false;              // #158
     bool ext_1_2_KHR_spirv_1_4 = false;                 // #237
     bool ext_EXT_memory_budget = false;                 // #238
+    bool ext_1_2_EXT_host_query_reset = false;          // promoted to 1.2
     // Has optional features not implied by this being true.
     bool ext_1_3_KHR_maintenance4 = false;  // #414
+#if XE_PLATFORM_WIN32
+    // VK_EXT_full_screen_exclusive (#256, Windows only)
+    bool ext_EXT_full_screen_exclusive = false;
+#endif
   };
 
   const Extensions& extensions() const { return extensions_; }
@@ -191,6 +214,8 @@ class VulkanDevice {
 #include "xenia/ui/vulkan/functions/device_1_1_khr_get_memory_requirements2.inc"
     // VK_KHR_bind_memory2 (#158, promoted to 1.1)
 #include "xenia/ui/vulkan/functions/device_1_1_khr_bind_memory2.inc"
+    // VK_EXT_host_query_reset (promoted to 1.2)
+#include "xenia/ui/vulkan/functions/device_1_2_ext_host_query_reset.inc"
     // VK_KHR_maintenance4 (#414, promoted to 1.3)
 #include "xenia/ui/vulkan/functions/device_1_3_khr_maintenance4.inc"
 #undef XE_UI_VULKAN_FUNCTION_PROMOTED
@@ -269,6 +294,25 @@ class VulkanDevice {
 
   const MemoryTypes& memory_types() const { return memory_types_; }
 
+  // Returns whether a device loss has been observed for the first time, so, for
+  // instance, logging of the device loss can be limited only to the location
+  // where it was first caught.
+  bool SetLost() noexcept {
+    return !lost_.exchange(true, std::memory_order_acq_rel);
+  }
+  bool IsLost() const noexcept { return lost_.load(std::memory_order_acquire); }
+
+  VkResult SubmitAndUpdateLost(const VkQueue queue, const uint32_t submit_count,
+                               const VkSubmitInfo* const submits,
+                               const VkFence fence) {
+    const VkResult submit_result =
+        functions().vkQueueSubmit(queue, submit_count, submits, fence);
+    if (submit_result == VK_ERROR_DEVICE_LOST) {
+      SetLost();
+    }
+    return submit_result;
+  }
+
  private:
   explicit VulkanDevice(const VulkanInstance* vulkan_instance,
                         VkPhysicalDevice physical_device);
@@ -288,6 +332,8 @@ class VulkanDevice {
   uint32_t queue_family_sparse_binding_ = UINT32_MAX;
 
   MemoryTypes memory_types_;
+
+  std::atomic<bool> lost_{false};
 };
 
 }  // namespace vulkan

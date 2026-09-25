@@ -1197,7 +1197,7 @@ void DxbcShaderTranslator::ROV_UnpackColor(
              dxbc::Src::LF(1.0f / 255.0f));
     if (i) {
       for (uint32_t j = 0; j < 3; ++j) {
-        PWLGammaToLinear(color_temp, j, color_temp, j, true, temp1,
+        PWLGammaToLinear(a_, color_temp, j, color_temp, j, true, temp1,
                          temp1_component, temp2, temp2_component);
       }
     }
@@ -1350,7 +1350,7 @@ void DxbcShaderTranslator::ROV_PackPreClampedColor(
           : xenos::ColorRenderTargetFormat::k_8_8_8_8)));
     for (uint32_t j = 0; j < 4; ++j) {
       if (i && j < 3) {
-        PreSaturatedLinearToPWLGamma(temp1, temp1_component, color_temp, j,
+        PreSaturatedLinearToPWLGamma(a_, temp1, temp1_component, color_temp, j,
                                      temp1, temp1_component, temp2,
                                      temp2_component);
         // Denormalize and add 0.5 for rounding.
@@ -1685,7 +1685,7 @@ void DxbcShaderTranslator::CompletePixelShader_WriteToRTVs() {
                  SystemConstants::Index::kColorExpBias,
                  offsetof(SystemConstants, color_exp_bias) + sizeof(float) * i,
                  dxbc::Src::kXXXX));
-    if (!gamma_render_target_as_srgb_) {
+    if (gamma_render_target_as_unorm8_) {
       // Convert to gamma space - this is incorrect, since it must be done after
       // blending on the Xbox 360, but this is just one of many blending issues
       // in the RTV path.
@@ -1696,10 +1696,148 @@ void DxbcShaderTranslator::CompletePixelShader_WriteToRTVs() {
       a_.OpMov(dxbc::Dest::R(system_temp_color, 0b0111),
                dxbc::Src::R(system_temp_color), true);
       for (uint32_t j = 0; j < 3; ++j) {
-        PreSaturatedLinearToPWLGamma(system_temp_color, j, system_temp_color, j,
-                                     gamma_temp, 0, gamma_temp, 1);
+        PreSaturatedLinearToPWLGamma(a_, system_temp_color, j,
+                                     system_temp_color, j, gamma_temp, 0,
+                                     gamma_temp, 1);
       }
       a_.OpEndIf();
+    }
+    // For RT0 with MIN/MAX blend op, pre-multiply by the source blend factor
+    // (since D3D12 MIN/MAX ignores blend factors, but Xbox 360 applies them).
+    if (i == 0 && !edram_rov_used_) {
+      xenos::BlendFactor rgb_factor_for_premult =
+          GetDxbcShaderModification().pixel.rt0_blend_rgb_factor_for_premult;
+      xenos::BlendFactor a_factor_for_premult =
+          GetDxbcShaderModification().pixel.rt0_blend_a_factor_for_premult;
+      bool premult_rgb = rgb_factor_for_premult != xenos::BlendFactor::kOne;
+      bool premult_a = a_factor_for_premult != xenos::BlendFactor::kOne;
+      if (premult_rgb || premult_a) {
+        uint32_t premult_temp = PushSystemTemp();
+        // Compute and apply RGB factor.
+        if (premult_rgb) {
+          switch (rgb_factor_for_premult) {
+            case xenos::BlendFactor::kZero:
+              a_.OpMov(dxbc::Dest::R(system_temp_color, 0b0111),
+                       dxbc::Src::LF(0.0f));
+              break;
+            case xenos::BlendFactor::kSrcColor:
+              // Multiply by itself (square).
+              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b0111),
+                       dxbc::Src::R(system_temp_color),
+                       dxbc::Src::R(system_temp_color));
+              break;
+            case xenos::BlendFactor::kOneMinusSrcColor:
+              a_.OpAdd(dxbc::Dest::R(premult_temp, 0b0111), dxbc::Src::LF(1.0f),
+                       -dxbc::Src::R(system_temp_color));
+              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b0111),
+                       dxbc::Src::R(system_temp_color),
+                       dxbc::Src::R(premult_temp));
+              break;
+            case xenos::BlendFactor::kSrcAlpha:
+              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b0111),
+                       dxbc::Src::R(system_temp_color),
+                       dxbc::Src::R(system_temp_color, dxbc::Src::kWWWW));
+              break;
+            case xenos::BlendFactor::kOneMinusSrcAlpha:
+              a_.OpAdd(dxbc::Dest::R(premult_temp, 0b0001), dxbc::Src::LF(1.0f),
+                       -dxbc::Src::R(system_temp_color, dxbc::Src::kWWWW));
+              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b0111),
+                       dxbc::Src::R(system_temp_color),
+                       dxbc::Src::R(premult_temp, dxbc::Src::kXXXX));
+              break;
+            case xenos::BlendFactor::kConstantColor:
+              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b0111),
+                       dxbc::Src::R(system_temp_color),
+                       LoadSystemConstant(
+                           SystemConstants::Index::kEdramBlendConstant,
+                           offsetof(SystemConstants, edram_blend_constant),
+                           dxbc::Src::kXYZW));
+              break;
+            case xenos::BlendFactor::kOneMinusConstantColor:
+              a_.OpAdd(dxbc::Dest::R(premult_temp, 0b0111), dxbc::Src::LF(1.0f),
+                       -LoadSystemConstant(
+                           SystemConstants::Index::kEdramBlendConstant,
+                           offsetof(SystemConstants, edram_blend_constant),
+                           dxbc::Src::kXYZW));
+              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b0111),
+                       dxbc::Src::R(system_temp_color),
+                       dxbc::Src::R(premult_temp));
+              break;
+            case xenos::BlendFactor::kConstantAlpha:
+              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b0111),
+                       dxbc::Src::R(system_temp_color),
+                       LoadSystemConstant(
+                           SystemConstants::Index::kEdramBlendConstant,
+                           offsetof(SystemConstants, edram_blend_constant),
+                           dxbc::Src::kWWWW));
+              break;
+            case xenos::BlendFactor::kOneMinusConstantAlpha:
+              a_.OpAdd(dxbc::Dest::R(premult_temp, 0b0001), dxbc::Src::LF(1.0f),
+                       -LoadSystemConstant(
+                           SystemConstants::Index::kEdramBlendConstant,
+                           offsetof(SystemConstants, edram_blend_constant),
+                           dxbc::Src::kWWWW));
+              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b0111),
+                       dxbc::Src::R(system_temp_color),
+                       dxbc::Src::R(premult_temp, dxbc::Src::kXXXX));
+              break;
+            default:
+              // kOne or unsupported - no pre-multiply.
+              break;
+          }
+        }
+        // Compute and apply alpha factor.
+        if (premult_a) {
+          switch (a_factor_for_premult) {
+            case xenos::BlendFactor::kZero:
+              a_.OpMov(dxbc::Dest::R(system_temp_color, 0b1000),
+                       dxbc::Src::LF(0.0f));
+              break;
+            case xenos::BlendFactor::kSrcColor:
+            case xenos::BlendFactor::kSrcAlpha:
+              // Alpha * Alpha.
+              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b1000),
+                       dxbc::Src::R(system_temp_color, dxbc::Src::kWWWW),
+                       dxbc::Src::R(system_temp_color, dxbc::Src::kWWWW));
+              break;
+            case xenos::BlendFactor::kOneMinusSrcColor:
+            case xenos::BlendFactor::kOneMinusSrcAlpha:
+              a_.OpAdd(dxbc::Dest::R(premult_temp, 0b0001), dxbc::Src::LF(1.0f),
+                       -dxbc::Src::R(system_temp_color, dxbc::Src::kWWWW));
+              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b1000),
+                       dxbc::Src::R(system_temp_color, dxbc::Src::kWWWW),
+                       dxbc::Src::R(premult_temp, dxbc::Src::kXXXX));
+              break;
+            case xenos::BlendFactor::kConstantColor:
+            case xenos::BlendFactor::kConstantAlpha:
+              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b1000),
+                       dxbc::Src::R(system_temp_color, dxbc::Src::kWWWW),
+                       LoadSystemConstant(
+                           SystemConstants::Index::kEdramBlendConstant,
+                           offsetof(SystemConstants, edram_blend_constant),
+                           dxbc::Src::kWWWW));
+              break;
+            case xenos::BlendFactor::kOneMinusConstantColor:
+            case xenos::BlendFactor::kOneMinusConstantAlpha:
+              a_.OpAdd(dxbc::Dest::R(premult_temp, 0b0001), dxbc::Src::LF(1.0f),
+                       -LoadSystemConstant(
+                           SystemConstants::Index::kEdramBlendConstant,
+                           offsetof(SystemConstants, edram_blend_constant),
+                           dxbc::Src::kWWWW));
+              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b1000),
+                       dxbc::Src::R(system_temp_color, dxbc::Src::kWWWW),
+                       dxbc::Src::R(premult_temp, dxbc::Src::kXXXX));
+              break;
+            case xenos::BlendFactor::kSrcAlphaSaturate:
+              // For alpha, SrcAlphaSaturate is 1.0, so no pre-multiply needed.
+              break;
+            default:
+              // kOne or unsupported - no pre-multiply.
+              break;
+          }
+        }
+        PopSystemTemp();  // premult_temp
+      }
     }
     // Copy the color from a readable temp register to an output register.
     a_.OpMov(dxbc::Dest::O(i), dxbc::Src::R(system_temp_color));
@@ -1710,6 +1848,38 @@ void DxbcShaderTranslator::CompletePixelShader_WriteToRTVs() {
 
 void DxbcShaderTranslator::CompletePixelShader_DSV_DepthTo24Bit() {
   bool shader_writes_depth = current_shader().writes_depth();
+  bool apply_polygon_offset = DSV_IsApplyingPolygonOffset();
+  auto write_polygon_offset_depth = [&](dxbc::Dest depth_dest, uint32_t temp,
+                                        dxbc::Src unbiased_depth) {
+    dxbc::Dest temp_x_dest(dxbc::Dest::R(temp, 0b0001));
+    dxbc::Src temp_x_src(dxbc::Src::R(temp, dxbc::Src::kXXXX));
+    in_front_face_used_ = true;
+    assert_true(system_temp_depth_stencil_ != UINT32_MAX);
+    a_.OpMax(temp_x_dest,
+             dxbc::Src::R(system_temp_depth_stencil_, dxbc::Src::kXXXX).Abs(),
+             dxbc::Src::R(system_temp_depth_stencil_, dxbc::Src::kYYYY).Abs());
+    a_.OpIf(true, dxbc::Src::V1D(in_reg_ps_front_face_sample_index_,
+                                 dxbc::Src::kXXXX));
+    a_.OpMAd(
+        temp_x_dest, temp_x_src,
+        LoadSystemConstant(SystemConstants::Index::kEdramPolyOffsetFront,
+                           offsetof(SystemConstants, edram_poly_offset_front),
+                           dxbc::Src::kXXXX),
+        LoadSystemConstant(SystemConstants::Index::kEdramPolyOffsetFront,
+                           offsetof(SystemConstants, edram_poly_offset_front),
+                           dxbc::Src::kYYYY));
+    a_.OpElse();
+    a_.OpMAd(
+        temp_x_dest, temp_x_src,
+        LoadSystemConstant(SystemConstants::Index::kEdramPolyOffsetBack,
+                           offsetof(SystemConstants, edram_poly_offset_back),
+                           dxbc::Src::kXXXX),
+        LoadSystemConstant(SystemConstants::Index::kEdramPolyOffsetBack,
+                           offsetof(SystemConstants, edram_poly_offset_back),
+                           dxbc::Src::kYYYY));
+    a_.OpEndIf();
+    a_.OpAdd(depth_dest, temp_x_src, unbiased_depth);
+  };
 
   if (!DSV_IsWritingFloat24Depth()) {
     if (shader_writes_depth) {
@@ -1727,6 +1897,16 @@ void DxbcShaderTranslator::CompletePixelShader_DSV_DepthTo24Bit() {
       // Write the depth from the temporary to the system depth output.
       a_.OpMov(dxbc::Dest::ODepth(),
                dxbc::Src::R(system_temp_depth_stencil_, dxbc::Src::kXXXX));
+    } else if (apply_polygon_offset) {
+      // Some decal draws use bias values too small for host RT depth bias to
+      // stay stable. Writing the biased depth here keeps those redraws stable
+      // against the receiver without forcing larger bias on unrelated draws.
+      uint32_t temp = PushSystemTemp();
+      dxbc::Src in_position_z(
+          dxbc::Src::V1D(in_reg_ps_position_, dxbc::Src::kZZZZ));
+      in_position_used_ |= 0b0100;
+      write_polygon_offset_depth(dxbc::Dest::ODepth(), temp, in_position_z);
+      PopSystemTemp();
     }
     return;
   }
@@ -1746,9 +1926,18 @@ void DxbcShaderTranslator::CompletePixelShader_DSV_DepthTo24Bit() {
     // assumption of it being clamped while working with the bit representation.
     temp = PushSystemTemp();
     in_position_used_ |= 0b0100;
-    a_.OpMul(dxbc::Dest::R(temp, 0b0001),
-             dxbc::Src::V1D(in_reg_ps_position_, dxbc::Src::kZZZZ),
-             dxbc::Src::LF(2.0f), true);
+    dxbc::Dest temp_x_dest(dxbc::Dest::R(temp, 0b0001));
+    dxbc::Src temp_x_src(dxbc::Src::R(temp, dxbc::Src::kXXXX));
+    dxbc::Src in_position_z(
+        dxbc::Src::V1D(in_reg_ps_position_, dxbc::Src::kZZZZ));
+    if (apply_polygon_offset) {
+      // Bias host depth first, then reuse the normal float24 conversion. D24FS
+      // scaling was handled when the polygon offset constants were uploaded.
+      write_polygon_offset_depth(temp_x_dest, temp, in_position_z);
+      a_.OpMul(temp_x_dest, temp_x_src, dxbc::Src::LF(2.0f), true);
+    } else {
+      a_.OpMul(temp_x_dest, in_position_z, dxbc::Src::LF(2.0f), true);
+    }
   }
 
   dxbc::Dest temp_x_dest(dxbc::Dest::R(temp, 0b0001));
@@ -1756,8 +1945,14 @@ void DxbcShaderTranslator::CompletePixelShader_DSV_DepthTo24Bit() {
   dxbc::Dest temp_y_dest(dxbc::Dest::R(temp, 0b0010));
   dxbc::Src temp_y_src(dxbc::Src::R(temp, dxbc::Src::kYYYY));
 
-  if (GetDxbcShaderModification().pixel.depth_stencil_mode ==
-      Modification::DepthStencilMode::kFloat24Truncating) {
+  Modification::DepthStencilMode depth_stencil_mode =
+      GetDxbcShaderModification().pixel.depth_stencil_mode;
+  bool depth_float24_truncating =
+      depth_stencil_mode ==
+          Modification::DepthStencilMode::kFloat24Truncating ||
+      depth_stencil_mode ==
+          Modification::DepthStencilMode::kFloat24TruncatingPolygonOffset;
+  if (depth_float24_truncating) {
     // Simplified conversion, always less than or equal to the original value -
     // just drop the lower bits.
     // The float32 exponent bias is 127.
@@ -1767,8 +1962,9 @@ void DxbcShaderTranslator::CompletePixelShader_DSV_DepthTo24Bit() {
     // The smallest denormalized 20e4 number is -34 - should drop 23 mantissa
     // bits at -34.
     // Anything smaller than 2^-34 becomes 0.
-    dxbc::Dest truncate_dest(shader_writes_depth ? dxbc::Dest::ODepth()
-                                                 : dxbc::Dest::ODepthLE());
+    dxbc::Dest truncate_dest((shader_writes_depth || apply_polygon_offset)
+                                 ? dxbc::Dest::ODepth()
+                                 : dxbc::Dest::ODepthLE());
     // Check if the number is representable as a float24 after truncation - the
     // exponent is at least -34.
     a_.OpUGE(temp_y_dest, temp_x_src, dxbc::Src::LU(0x2E800000));
@@ -1982,6 +2178,52 @@ void DxbcShaderTranslator::CompletePixelShader_AlphaToMask() {
   a_.OpEndIf();
 }
 
+void DxbcShaderTranslator::ROV_AddPassedMSAASamplesToZPD() {
+  if (uav_index_zpd_rov_counter_ == kBindingIndexUnallocated) {
+    uav_index_zpd_rov_counter_ = uav_count_++;
+  }
+
+  uint32_t temp = PushSystemTemp();
+  dxbc::Dest temp_x_dest(dxbc::Dest::R(temp, 0b0001));
+  dxbc::Src temp_x_src(dxbc::Src::R(temp, dxbc::Src::kXXXX));
+  dxbc::Dest temp_y_dest(dxbc::Dest::R(temp, 0b0010));
+  dxbc::Src temp_y_src(dxbc::Src::R(temp, dxbc::Src::kYYYY));
+
+  dxbc::Src counter_index_src(LoadSystemConstant(
+      SystemConstants::Index::kZpdRovCounterIndex,
+      offsetof(SystemConstants, zpd_rov_counter_index), dxbc::Src::kXXXX));
+
+  // UINT32_MAX means no ZPD segment is currently open for this draw.
+  a_.OpINE(temp_x_dest, counter_index_src, dxbc::Src::LU(UINT32_MAX));
+  a_.OpIf(true, temp_x_src);
+
+  {
+    // Only bits 0:3 are surviving coverage. 4:7 are deferred depth/stencil
+    // writes and don't contribute to the counter.
+    a_.OpAnd(temp_x_dest,
+             dxbc::Src::R(system_temp_rov_params_, dxbc::Src::kXXXX),
+             dxbc::Src::LU((uint32_t(1) << 4) - 1));
+    a_.OpCountBits(temp_x_dest, temp_x_src);
+    a_.OpIf(true, temp_x_src);
+    {
+      // The counter UAV is raw, so address it in bytes.
+      // One counter slot is one uint32_t.
+      a_.OpUMul(dxbc::Dest::Null(), temp_y_dest, counter_index_src,
+                dxbc::Src::LU(sizeof(uint32_t)));
+      // Add the number of samples that survived depth/stencil for this pixel to
+      // the active query slot. This slot is copied to the readback buffer when
+      // the ZPD segment is closed.
+      a_.OpAtomicIAdd(dxbc::Dest::U(uav_index_zpd_rov_counter_,
+                                    uint32_t(UAVRegister::kZpdRovCounter), 0),
+                      temp_y_src, 0b0001, temp_x_src);
+    }
+    a_.OpEndIf();
+  }
+  a_.OpEndIf();
+
+  PopSystemTemp();
+}
+
 void DxbcShaderTranslator::CompletePixelShader_WriteToROV() {
   uint32_t temp = PushSystemTemp();
   dxbc::Dest temp_x_dest(dxbc::Dest::R(temp, 0b0001));
@@ -2037,6 +2279,8 @@ void DxbcShaderTranslator::CompletePixelShader_WriteToROV() {
 
   // system_temp_rov_params_.y (the depth / stencil sample address) is not
   // needed anymore, can be used for color writing.
+
+  ROV_AddPassedMSAASamplesToZPD();
 
   if (!is_depth_only_pixel_shader_) {
     // Check if any sample is still covered after depth testing and writing,
@@ -2526,33 +2770,126 @@ void DxbcShaderTranslator::CompletePixelShader_WriteToROV() {
                      rt_clamp_vec_src.Select(2));
           }
           // Need to do min/max for color.
+          // Note: Unlike Vulkan/D3D12 fixed-function blend which ignores
+          // factors for MIN/MAX, the Xbox 360 applies blend factors before
+          // min/max.
           a_.OpElse();
           {
-            // Extract the color min (0) or max (1) bit to temp.x
-            // temp.x = whether min or max should be used for color.
+            uint32_t blend_src_temp = PushSystemTemp();
+            dxbc::Dest blend_src_temp_rgb_dest(
+                dxbc::Dest::R(blend_src_temp, 0b0111));
+            dxbc::Src blend_src_temp_src(dxbc::Src::R(blend_src_temp));
+
+            // Apply source color factor for min/max.
+            // Extract the source color factor to temp.x.
             a_.OpAnd(temp_x_dest, rt_blend_factors_ops_src,
-                     dxbc::Src::LU(1 << 5));
-            // Check if need to do min or max for color.
-            // temp.x = free.
+                     dxbc::Src::LU((1 << 5) - 1));
             a_.OpIf(true, temp_x_src);
             {
-              // Choose max of the colors without applying the factors to
-              // color_temp.xyz.
-              // color_temp.xyz = blended color.
-              a_.OpMax(color_temp_rgb_dest,
-                       dxbc::Src::R(system_temps_color_[i]), color_temp_src);
+              a_.OpSwitch(temp_x_src);
+              ROV_HandleColorBlendFactorCases(system_temps_color_[i],
+                                              color_temp, blend_src_temp);
+              a_.OpEndSwitch();
+              // Check if fixed-point and needs clamping.
+              a_.OpAnd(
+                  temp_x_dest, rt_format_flags_src,
+                  dxbc::Src::LU(
+                      RenderTargetCache::kPSIColorFormatFlag_FixedPointColor));
+              a_.OpIf(true, temp_x_src);
+              {
+                a_.OpMax(blend_src_temp_rgb_dest, blend_src_temp_src,
+                         rt_clamp_vec_src.Select(0));
+                a_.OpMin(blend_src_temp_rgb_dest, blend_src_temp_src,
+                         rt_clamp_vec_src.Select(2));
+              }
+              a_.OpEndIf();
+              // Multiply source by factor.
+              a_.OpMul(blend_src_temp_rgb_dest,
+                       dxbc::Src::R(system_temps_color_[i]),
+                       blend_src_temp_src);
+              // Clamp result if fixed-point.
+              a_.OpIf(true, temp_x_src);
+              {
+                a_.OpMax(blend_src_temp_rgb_dest, blend_src_temp_src,
+                         rt_clamp_vec_src.Select(0));
+                a_.OpMin(blend_src_temp_rgb_dest, blend_src_temp_src,
+                         rt_clamp_vec_src.Select(2));
+              }
+              a_.OpEndIf();
             }
-            // Need to do min.
             a_.OpElse();
             {
-              // Choose min of the colors without applying the factors to
-              // color_temp.xyz.
-              // color_temp.xyz = blended color.
-              a_.OpMin(color_temp_rgb_dest,
-                       dxbc::Src::R(system_temps_color_[i]), color_temp_src);
+              a_.OpMov(blend_src_temp_rgb_dest, dxbc::Src::LF(0.0f));
             }
-            // Close the min or max check.
             a_.OpEndIf();
+
+            // Apply destination color factor for min/max.
+            uint32_t blend_dest_temp = PushSystemTemp();
+            dxbc::Dest blend_dest_temp_rgb_dest(
+                dxbc::Dest::R(blend_dest_temp, 0b0111));
+            dxbc::Src blend_dest_temp_src(dxbc::Src::R(blend_dest_temp));
+
+            // Extract the destination color factor to temp.x.
+            a_.OpUBFE(temp_x_dest, dxbc::Src::LU(5), dxbc::Src::LU(8),
+                      rt_blend_factors_ops_src);
+            a_.OpIf(true, temp_x_src);
+            {
+              a_.OpSwitch(temp_x_src);
+              ROV_HandleColorBlendFactorCases(system_temps_color_[i],
+                                              color_temp, blend_dest_temp);
+              a_.OpEndSwitch();
+              // Check if fixed-point and needs clamping.
+              a_.OpAnd(
+                  temp_x_dest, rt_format_flags_src,
+                  dxbc::Src::LU(
+                      RenderTargetCache::kPSIColorFormatFlag_FixedPointColor));
+              a_.OpIf(true, temp_x_src);
+              {
+                a_.OpMax(blend_dest_temp_rgb_dest, blend_dest_temp_src,
+                         rt_clamp_vec_src.Select(0));
+                a_.OpMin(blend_dest_temp_rgb_dest, blend_dest_temp_src,
+                         rt_clamp_vec_src.Select(2));
+              }
+              a_.OpEndIf();
+              // Multiply destination by factor.
+              a_.OpMul(blend_dest_temp_rgb_dest, color_temp_src,
+                       blend_dest_temp_src);
+              // Clamp result if fixed-point.
+              a_.OpIf(true, temp_x_src);
+              {
+                a_.OpMax(blend_dest_temp_rgb_dest, blend_dest_temp_src,
+                         rt_clamp_vec_src.Select(0));
+                a_.OpMin(blend_dest_temp_rgb_dest, blend_dest_temp_src,
+                         rt_clamp_vec_src.Select(2));
+              }
+              a_.OpEndIf();
+            }
+            a_.OpElse();
+            {
+              a_.OpMov(blend_dest_temp_rgb_dest, dxbc::Src::LF(0.0f));
+            }
+            a_.OpEndIf();
+
+            // Now do min or max on the factored values.
+            // Extract the color min (0) or max (1) bit to temp.x.
+            a_.OpAnd(temp_x_dest, rt_blend_factors_ops_src,
+                     dxbc::Src::LU(1 << 5));
+            a_.OpIf(true, temp_x_src);
+            {
+              // MAX: color_temp.xyz = max(src * srcFactor, dst * dstFactor)
+              a_.OpMax(color_temp_rgb_dest, blend_src_temp_src,
+                       blend_dest_temp_src);
+            }
+            a_.OpElse();
+            {
+              // MIN: color_temp.xyz = min(src * srcFactor, dst * dstFactor)
+              a_.OpMin(color_temp_rgb_dest, blend_src_temp_src,
+                       blend_dest_temp_src);
+            }
+            a_.OpEndIf();
+
+            PopSystemTemp();  // blend_dest_temp
+            PopSystemTemp();  // blend_src_temp
           }
           // Close the color factor blending or min/max check.
           a_.OpEndIf();
@@ -2731,34 +3068,114 @@ void DxbcShaderTranslator::CompletePixelShader_WriteToROV() {
                      rt_clamp_vec_src.Select(3));
           }
           // Need to do min/max for alpha.
+          // Note: Unlike Vulkan/D3D12 fixed-function blend which ignores
+          // factors for MIN/MAX, the Xbox 360 applies blend factors before
+          // min/max.
           a_.OpElse();
           {
-            // Extract the alpha min (0) or max (1) bit to temp.x.
-            // temp.x = whether min or max should be used for alpha.
-            a_.OpAnd(temp_x_dest, rt_blend_factors_ops_src,
-                     dxbc::Src::LU(1 << 21));
-            // Check if need to do min or max for alpha.
-            // temp.x = free.
+            // We'll use temp.x for source alpha (factored) and temp.y for
+            // destination alpha (factored).
+
+            // Apply source alpha factor for min/max.
+            // Extract the source alpha factor to temp.x (bits 16-20).
+            a_.OpUBFE(temp_x_dest, dxbc::Src::LU(5), dxbc::Src::LU(16),
+                      rt_blend_factors_ops_src);
             a_.OpIf(true, temp_x_src);
             {
-              // Choose max of the alphas without applying the factors to
-              // color_temp.w.
-              // color_temp.w = blended alpha.
-              a_.OpMax(color_temp_a_dest,
+              a_.OpSwitch(temp_x_src);
+              ROV_HandleAlphaBlendFactorCases(system_temps_color_[i],
+                                              color_temp, temp, 0);
+              a_.OpEndSwitch();
+              // Check if fixed-point and needs clamping.
+              uint32_t alpha_is_fixed_temp = PushSystemTemp();
+              a_.OpAnd(
+                  dxbc::Dest::R(alpha_is_fixed_temp, 0b0001),
+                  rt_format_flags_src,
+                  dxbc::Src::LU(
+                      RenderTargetCache::kPSIColorFormatFlag_FixedPointAlpha));
+              a_.OpIf(true,
+                      dxbc::Src::R(alpha_is_fixed_temp, dxbc::Src::kXXXX));
+              {
+                a_.OpMax(temp_x_dest, temp_x_src, rt_clamp_vec_src.Select(1));
+                a_.OpMin(temp_x_dest, temp_x_src, rt_clamp_vec_src.Select(3));
+              }
+              a_.OpEndIf();
+              // Multiply source alpha by factor.
+              a_.OpMul(temp_x_dest,
                        dxbc::Src::R(system_temps_color_[i], dxbc::Src::kWWWW),
-                       color_temp_a_src);
+                       temp_x_src);
+              // Clamp result if fixed-point.
+              a_.OpIf(true,
+                      dxbc::Src::R(alpha_is_fixed_temp, dxbc::Src::kXXXX));
+              PopSystemTemp();  // alpha_is_fixed_temp
+              {
+                a_.OpMax(temp_x_dest, temp_x_src, rt_clamp_vec_src.Select(1));
+                a_.OpMin(temp_x_dest, temp_x_src, rt_clamp_vec_src.Select(3));
+              }
+              a_.OpEndIf();
             }
-            // Need to do min.
             a_.OpElse();
             {
-              // Choose min of the alphas without applying the factors to
-              // color_temp.w.
-              // color_temp.w = blended alpha.
-              a_.OpMin(color_temp_a_dest,
-                       dxbc::Src::R(system_temps_color_[i], dxbc::Src::kWWWW),
-                       color_temp_a_src);
+              a_.OpMov(temp_x_dest, dxbc::Src::LF(0.0f));
             }
-            // Close the min or max check.
+            a_.OpEndIf();
+
+            // Apply destination alpha factor for min/max.
+            // Extract the destination alpha factor to temp.y (bits 24-28).
+            a_.OpUBFE(temp_y_dest, dxbc::Src::LU(5), dxbc::Src::LU(24),
+                      rt_blend_factors_ops_src);
+            a_.OpIf(true, temp_y_src);
+            {
+              a_.OpSwitch(temp_y_src);
+              ROV_HandleAlphaBlendFactorCases(system_temps_color_[i],
+                                              color_temp, temp, 1);
+              a_.OpEndSwitch();
+              // Check if fixed-point and needs clamping.
+              uint32_t alpha_is_fixed_temp2 = PushSystemTemp();
+              a_.OpAnd(
+                  dxbc::Dest::R(alpha_is_fixed_temp2, 0b0001),
+                  rt_format_flags_src,
+                  dxbc::Src::LU(
+                      RenderTargetCache::kPSIColorFormatFlag_FixedPointAlpha));
+              a_.OpIf(true,
+                      dxbc::Src::R(alpha_is_fixed_temp2, dxbc::Src::kXXXX));
+              {
+                a_.OpMax(temp_y_dest, temp_y_src, rt_clamp_vec_src.Select(1));
+                a_.OpMin(temp_y_dest, temp_y_src, rt_clamp_vec_src.Select(3));
+              }
+              a_.OpEndIf();
+              // Multiply destination alpha by factor.
+              a_.OpMul(temp_y_dest, color_temp_a_src, temp_y_src);
+              // Clamp result if fixed-point.
+              a_.OpIf(true,
+                      dxbc::Src::R(alpha_is_fixed_temp2, dxbc::Src::kXXXX));
+              PopSystemTemp();  // alpha_is_fixed_temp2
+              {
+                a_.OpMax(temp_y_dest, temp_y_src, rt_clamp_vec_src.Select(1));
+                a_.OpMin(temp_y_dest, temp_y_src, rt_clamp_vec_src.Select(3));
+              }
+              a_.OpEndIf();
+            }
+            a_.OpElse();
+            {
+              a_.OpMov(temp_y_dest, dxbc::Src::LF(0.0f));
+            }
+            a_.OpEndIf();
+
+            // Now do min or max on the factored alpha values.
+            // Extract the alpha min (0) or max (1) bit to color_temp.w.
+            a_.OpAnd(color_temp_a_dest, rt_blend_factors_ops_src,
+                     dxbc::Src::LU(1 << 21));
+            a_.OpIf(true, color_temp_a_src);
+            {
+              // MAX: color_temp.w = max(src * srcFactor, dst * dstFactor)
+              a_.OpMax(color_temp_a_dest, temp_x_src, temp_y_src);
+            }
+            a_.OpElse();
+            {
+              // MIN: color_temp.w = min(src * srcFactor, dst * dstFactor)
+              a_.OpMin(color_temp_a_dest, temp_x_src, temp_y_src);
+            }
             a_.OpEndIf();
           }
           // Close the alpha factor blending or min/max check.

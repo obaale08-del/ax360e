@@ -31,6 +31,11 @@ public class Emulator {
         private native void native_save_config_entry(long n_handle,String tag,String val);
 
         private native void native_save_config_entry_ty_arr(long n_handle,String tag,String[] val);
+
+        private native int native_load_config_tab_arr_size(long n_handle, String tag);
+        private native String native_load_config_tab_arr_entry(long n_handle, String tag, int index);
+        private native void native_save_config_tab_arr_entry(long n_handle, String tag, int index, String val);
+
         private native void native_close_config_file(long n_handle,String config_path);
         public static Emulator.Config open_config_file(String config_path) throws Emulator.ConfigFileException
         {
@@ -67,6 +72,21 @@ public class Emulator {
         public void save_config_entry_ty_arr(String tag,String[] val)
         {
             native_save_config_entry_ty_arr(n_handle,tag,val);
+        }
+
+        public int load_config_tab_arr_size(String tag)
+        {
+            return native_load_config_tab_arr_size(n_handle, tag);
+        }
+
+        public String load_config_tab_arr_entry(String tag, int index)
+        {
+            return native_load_config_tab_arr_entry(n_handle, tag, index);
+        }
+
+        public void save_config_tab_arr_entry(String tag, int index, String val)
+        {
+            native_save_config_tab_arr_entry(n_handle, tag, index, val);
         }
         public void close_config_file()
         {
@@ -107,6 +127,10 @@ public class Emulator {
     public native void boot() throws Emulator.BootException;
 
     public native void key_event(int key_code,boolean pressed,int value);
+
+    // Forward text from the Android soft keyboard to the emulator UI
+    // (KeyboardInputDialog). done=true commits the text (acts like OK).
+    public native void ime_input(String text,boolean done);
 
     public native void quit();
 

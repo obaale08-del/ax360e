@@ -34,10 +34,22 @@ class KernelState;
 template <typename T>
 class object_ref;
 
+enum X_DISPATCHER_FLAGS : uint8_t {
+  DISPATCHER_MANUAL_RESET_EVENT = 0,  // EventNotificationObject
+  DISPATCHER_AUTO_RESET_EVENT = 1,    // EventSynchronizationObject
+  DISPATCHER_MUTANT = 2,              // MutantObject
+  DISPATCHER_QUEUE = 4,
+  DISPATCHER_SEMAPHORE = 5,  // SemaphoreObject
+  DISPATCHER_THREAD = 6,
+  DISPATCHER_MANUAL_RESET_TIMER = 8,
+  DISPATCHER_AUTO_RESET_TIMER = 9,
+  DISPATCHER_UNDEFINED = 0xFF,
+};
+
 // https://www.nirsoft.net/kernel_struct/vista/DISPATCHER_HEADER.html
 typedef struct {
   struct {
-    uint8_t type;
+    X_DISPATCHER_FLAGS type;
 
     union {
       uint8_t abandoned;
@@ -62,42 +74,15 @@ typedef struct {
 } X_DISPATCH_HEADER;
 static_assert_size(X_DISPATCH_HEADER, 0x10);
 
-// https://www.nirsoft.net/kernel_struct/vista/OBJECT_HEADER.html
 struct X_OBJECT_HEADER {
-  xe::be<uint32_t> pointer_count;
-  union {
-    xe::be<uint32_t> handle_count;
-    xe::be<uint32_t> next_to_free;
-  };
-  uint8_t name_info_offset;
-  uint8_t handle_info_offset;
-  uint8_t quota_info_offset;
-  uint8_t flags;
-  union {
-    xe::be<uint32_t> object_create_info;  // X_OBJECT_CREATE_INFORMATION
-    xe::be<uint32_t> quota_block_charged;
-  };
-  xe::be<uint32_t> object_type_ptr;  // -0x8 POBJECT_TYPE
-  xe::be<uint32_t> unk_04;           // -0x4
-
+  xe::be<int32_t> pointer_count;
+  xe::be<int32_t> handle_count;
+  xe::be<uint32_t> object_type_ptr;  // X_OBJECT_TYPE*
+  xe::be<int16_t> flags;
+  xe::be<int8_t> hash_index;
   // Object lives after this header.
-  // (There's actually a body field here which is the object itself)
 };
-
-// https://www.nirsoft.net/kernel_struct/vista/OBJECT_CREATE_INFORMATION.html
-struct X_OBJECT_CREATE_INFORMATION {
-  xe::be<uint32_t> attributes;                  // 0x0
-  xe::be<uint32_t> root_directory_ptr;          // 0x4
-  xe::be<uint32_t> parse_context_ptr;           // 0x8
-  xe::be<uint32_t> probe_mode;                  // 0xC
-  xe::be<uint32_t> paged_pool_charge;           // 0x10
-  xe::be<uint32_t> non_paged_pool_charge;       // 0x14
-  xe::be<uint32_t> security_descriptor_charge;  // 0x18
-  xe::be<uint32_t> security_descriptor;         // 0x1C
-  xe::be<uint32_t> security_qos_ptr;            // 0x20
-
-  // Security QoS here (SECURITY_QUALITY_OF_SERVICE) too!
-};
+static_assert_size(X_OBJECT_HEADER, 0x10);
 
 class XObject {
  public:
@@ -138,27 +123,30 @@ class XObject {
       default:
         return false;
     }
-    return false;
   }
 
-  static Type MapGuestTypeToHost(uint16_t type) {
-    // todo: this is not fully filled in
-    switch (type) {
-      case 0:
-      case 1:
+  static Type MapGuestTypeToHost(X_DISPATCHER_FLAGS flag) {
+    // TODO: This is not fully filled in.
+    switch (flag) {
+      case X_DISPATCHER_FLAGS::DISPATCHER_MANUAL_RESET_EVENT:
+      case X_DISPATCHER_FLAGS::DISPATCHER_AUTO_RESET_EVENT:
         return Type::Event;
-      case 2:
         return Type::Mutant;
-      case 5:
+      case X_DISPATCHER_FLAGS::DISPATCHER_MUTANT:
+        return Type::Mutant;
+      case X_DISPATCHER_FLAGS::DISPATCHER_SEMAPHORE:
         return Type::Semaphore;
-      case 6:
+      case X_DISPATCHER_FLAGS::DISPATCHER_THREAD:
         return Type::Thread;
-      case 8:
-      case 9:
+      case X_DISPATCHER_FLAGS::DISPATCHER_MANUAL_RESET_TIMER:
+      case X_DISPATCHER_FLAGS::DISPATCHER_AUTO_RESET_TIMER:
         return Type::Timer;
+      default:
+        return Type::Undefined;
+        // assert_always();
     }
-    return Type::Undefined;
   }
+
   XObject(Type type);
   XObject(KernelState* kernel_state, Type type, bool host_object = false);
   virtual ~XObject();
@@ -217,14 +205,15 @@ class XObject {
                                uint32_t processor_mode, uint32_t alertable,
                                uint64_t* opt_timeout);
 
-  static object_ref<XObject> GetNativeObject(KernelState* kernel_state,
-                                             void* native_ptr,
-                                             int32_t as_type = -1,
-                                             bool already_locked = false);
+  static object_ref<XObject> GetNativeObject(
+      KernelState* kernel_state, void* native_ptr,
+      X_DISPATCHER_FLAGS as_type = DISPATCHER_UNDEFINED,
+      bool already_locked = false);
   template <typename T>
-  static object_ref<T> GetNativeObject(KernelState* kernel_state,
-                                       void* native_ptr, int32_t as_type = -1,
-                                       bool already_locked = false);
+  static object_ref<T> GetNativeObject(
+      KernelState* kernel_state, void* native_ptr,
+      X_DISPATCHER_FLAGS as_type = DISPATCHER_UNDEFINED,
+      bool already_locked = false);
 
   // Priority increment stored by the most recent signal operation
   // (KeSetEvent, KeReleaseSemaphore, etc.).  Read by the waiter on wake
@@ -293,13 +282,17 @@ class object_ref {
   }
   explicit object_ref(const object_ref& right) noexcept {
     reset(right.get());
-    if (value_) value_->Retain();
+    if (value_) {
+      value_->Retain();
+    }
   }
   template <class V>
     requires std::is_convertible_v<V*, T*>
   object_ref(const object_ref<V>& right) noexcept {
     reset(right.get());
-    if (value_) value_->Retain();
+    if (value_) {
+      value_->Retain();
+    }
   }
 
   object_ref(object_ref&& right) noexcept : value_(right.release()) {}
@@ -395,13 +388,16 @@ object_ref<T> make_object(Args&&... args) {
 
 template <typename T>
 object_ref<T> retain_object(T* ptr) {
-  if (ptr) ptr->Retain();
+  if (ptr) {
+    ptr->Retain();
+  }
   return object_ref<T>(ptr);
 }
 
 template <typename T>
 object_ref<T> XObject::GetNativeObject(KernelState* kernel_state,
-                                       void* native_ptr, int32_t as_type,
+                                       void* native_ptr,
+                                       X_DISPATCHER_FLAGS as_type,
                                        bool already_locked) {
   return object_ref<T>(reinterpret_cast<T*>(
       GetNativeObject(kernel_state, native_ptr, as_type, already_locked)

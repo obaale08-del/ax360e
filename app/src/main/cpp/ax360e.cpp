@@ -13,6 +13,7 @@ int register_Emulator(JNIEnv* env);
 int register_Emulator$Config(JNIEnv* env);
 
 int register_ax360e_Emulator(JNIEnv* env);
+int cache_ax360e_activity_jni(JNIEnv* env);
 
 JavaVM* g_jvm;
 
@@ -44,6 +45,9 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved){
         LOGE("register_ax360e_Emulator failed");
         goto bail;
     }
+
+    // Optional soft keyboard bridge; must not break library loading on failure.
+    cache_ax360e_activity_jni(env);
     result = JNI_VERSION_1_6;
 
     LOGW("JNI_OnLoad OK");

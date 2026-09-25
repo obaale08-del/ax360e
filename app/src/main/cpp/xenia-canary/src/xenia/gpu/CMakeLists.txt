@@ -13,9 +13,9 @@ else()
   )
   if(ANDROID)
     target_include_directories(xenia-gpu PRIVATE
-            ${PROJECT_SOURCE_DIR}/..
+      ${PROJECT_SOURCE_DIR}/..
     )
-  endif ()
+  endif()
   target_link_libraries(xenia-gpu PUBLIC dxbc fmt glslang-spirv snappy xxhash xenia-base xenia-ui)
 endif()
 xe_target_defaults(xenia-gpu)
